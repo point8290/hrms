@@ -1,0 +1,330 @@
+# SEMANTIC - event catalog.
+# status: implemented -> produced and consumed by running code
+# status: produced    -> emitted, but nothing consumes it yet
+# status: planned     -> reserved in the contract, not emitted
+#
+# Every event travels: business txn + outbox row -> publisher -> SQS -> consumer.
+# The contract itself lives in packages/events/src/index.ts; this file explains it.
+
+meta:
+  type: semantic
+  schema_version: 2
+  broker: aws-sqs
+  delivery: at-least-once
+  transport_pattern: outbox
+  source: ArchitectureDiagram/07..10, 04, 05, README s.7
+
+envelope:
+  required: [event_id, event_type, schema_version, tenant_id, aggregate_type, aggregate_id, occurred_at, producer, payload]
+  optional: [correlation_id, request_id]
+  rule: tenant_id is mandatory because a worker has no JWT; a message without it must be dead-lettered, never processed
+
+consumer_contract:
+  - check processed_event(event_id, consumer_name) before doing work
+  - BEGIN, SET LOCAL app.tenant_id from the envelope, then query
+  - write the business change and processed_event in one transaction
+  - ACK only after commit
+  - failures go to the queue DLQ, never to silent discard
+
+events:
+
+  EmployeeCreated:
+    status: implemented
+    aggregate: employee
+    producer: [core_hr]
+    consumers: [onboarding, notification, documents]
+    required_context: [tenant_id, employee_id]
+    payload_ids: [employee_id, company_id]
+    consumer_requirements: [idempotent, tenant_context]
+    source: ArchitectureDiagram/07-sequence-onboarding.puml
+
+  CheckinRecorded:
+    status: implemented
+    aggregate: employee_checkin
+    producer: [attendance]
+    consumers: [attendance]
+    consumed_by_service: workforce-engine
+    required_context: [tenant_id, employee_id]
+    payload_ids: [checkin_id, employee_id, checkin_at]
+    consumer_requirements: [idempotent, tenant_context, tolerate_out_of_order, tolerate_duplicate]
+    source: ArchitectureDiagram/08-sequence-attendance.puml
+
+  AttendanceCalculated:
+    status: produced
+    aggregate: attendance
+    producer: [attendance]
+    produced_by_service: workforce-engine
+    consumers: [payroll, notification]
+    required_context: [tenant_id, employee_id]
+    payload_ids: [attendance_id, employee_id, attendance_date, calculation_version]
+    consumer_requirements: [idempotent, tenant_context]
+    source: ArchitectureDiagram/04-workforce-components.puml
+
+  LeaveApplied:
+    status: implemented
+    aggregate: leave_application
+    producer: [leave]
+    consumers: [notification, workflow]
+    required_context: [tenant_id, employee_id]
+    payload_ids: [leave_application_id, employee_id, leave_type_id, start_date, end_date]
+    consumer_requirements: [idempotent, tenant_context]
+    source: ArchitectureDiagram/09-sequence-leave.puml
+
+  LeaveApproved:
+    status: implemented
+    aggregate: leave_application
+    producer: [leave]
+    consumers: [notification, payroll, attendance]
+    required_context: [tenant_id, employee_id]
+    payload_ids: [leave_application_id, employee_id, leave_type_id, quantity]
+    consumer_requirements: [idempotent, tenant_context]
+    note: the ledger entry is written in the approving transaction, not by a consumer
+    source: ArchitectureDiagram/09-sequence-leave.puml
+
+  LeaveRejected:
+    status: implemented
+    aggregate: leave_application
+    producer: [leave]
+    consumers: [notification]
+    required_context: [tenant_id, employee_id]
+    payload_ids: [leave_application_id, employee_id]
+    consumer_requirements: [idempotent, tenant_context]
+    source: ArchitectureDiagram/09-sequence-leave.puml
+
+  PayrollRunCreated:
+    status: implemented
+    aggregate: payroll_run
+    producer: [payroll]
+    consumers: [payroll]
+    consumed_by_service: payroll-engine
+    required_context: [tenant_id]
+    payload_ids: [payroll_run_id, payroll_period_id]
+    consumer_requirements: [idempotent, tenant_context, snapshot_only_input]
+    note: input snapshot is committed before this event is published
+    source: ArchitectureDiagram/10-sequence-payroll.puml
+
+  PayrollCalculated:
+    status: produced
+    aggregate: payroll_run
+    producer: [payroll]
+    produced_by_service: payroll-engine
+    consumers: [payroll, notification]
+    required_context: [tenant_id]
+    payload_ids: [payroll_run_id, calculation_version]
+    consumer_requirements: [idempotent, tenant_context]
+    source: ArchitectureDiagram/10-sequence-payroll.puml
+
+  SalarySlipGenerated:
+    status: implemented
+    aggregate: salary_slip
+    producer: [payroll]
+    produced_by_service: api-worker
+    consumers: [documents, notification]
+    required_context: [tenant_id, employee_id]
+    payload_ids: [salary_slip_id, payroll_run_id, employee_id, slip_number]
+    consumer_requirements: [idempotent, tenant_context]
+    meaning: >-
+      A finalized, immutable salary slip artifact exists for this employee and is ready for
+      document generation and delivery.
+    emitted: >-
+      Per slip, by the worker, AFTER PayrollFinalized - NOT by the engine when it writes a
+      draft slip, which is where ArchitectureDiagram/05 places it (ADR-009). A slip written
+      at calculation time is still draft and its figures can change, so a document produced
+      then could contradict what is eventually paid.
+    note: >-
+      Fan-out is per slip so one employee's PDF failing retries that employee instead of
+      discarding a whole run, and so no S3 call happens inside a long transaction.
+    source: ADR-009, amends ArchitectureDiagram/05-payroll-components.puml
+
+  PayrollFinalized:
+    status: implemented
+    aggregate: payroll_run
+    producer: [payroll]
+    consumers: [documents, notification, audit]
+    required_context: [tenant_id]
+    payload_ids: [payroll_run_id]
+    consumer_requirements: [idempotent, tenant_context]
+    note: triggers payslip PDF to S3, document metadata write and employee email
+    source: ArchitectureDiagram/10-sequence-payroll.puml
+
+additional_events:
+  note: >-
+    Added during implementation. Not in the original diagrams, but each exists because a
+    real flow needed it.
+
+  AttendanceCloseRequested:
+    status: implemented
+    aggregate: attendance_close_run
+    producer: [attendance]
+    produced_by_service: api-worker
+    consumers: [attendance]
+    consumed_by_service: workforce-engine
+    required_context: [tenant_id]
+    payload_ids: [close_run_id, business_date, attempt]
+    consumer_requirements: [idempotent, tenant_context]
+    effect: >-
+      Runs the daily close for one tenant-day: the only path that may record an absence
+      (ADR-007). The close_run row is locked FOR UPDATE for the duration, so two workers
+      handed the same message cannot both evaluate the day.
+    source: ADR-007
+
+  AttendanceClosed:
+    status: implemented
+    aggregate: attendance_close_run
+    producer: [attendance]
+    produced_by_service: workforce-engine
+    consumers: []
+    required_context: [tenant_id]
+    payload_ids: [close_run_id, business_date, employee_count]
+    consumer_requirements: [idempotent, tenant_context]
+    note: >-
+      Nothing consumes it yet. It exists because "was attendance closed for that day" is a
+      question a payroll dispute will ask months later; payroll reads the close_run table
+      rather than this event.
+    source: ADR-007
+
+  AttendanceCorrectionApproved:
+    status: implemented
+    aggregate: attendance_correction
+    producer: [attendance]
+    consumers: [attendance]
+    consumed_by_service: workforce-engine
+    required_context: [tenant_id, employee_id]
+    consumer_requirements: [idempotent, tenant_context]
+    effect: >-
+      Queues a recalculation for the affected date range. Also emitted by the operator
+      recalculation endpoint, which is why its payload carries from_date/to_date rather
+      than a single correction id.
+
+  EmployeeSeparated:
+    status: implemented
+    aggregate: employee
+    producer: [employee_lifecycle]
+    consumers: [leave, notification]
+    required_context: [tenant_id, employee_id]
+    consumer_requirements: [idempotent, tenant_context]
+    effect: >-
+      Cancels future-dated pending leave. Payroll deliberately does NOT react: a separation
+      must never mutate a payroll run that is already in flight.
+
+  EmployeeUpdated:
+    status: produced
+    aggregate: employee
+    producer: [core_hr]
+    consumers: []
+    required_context: [tenant_id]
+    consumer_requirements: [idempotent, tenant_context]
+
+  EmployeeTransferred:
+    status: produced
+    aggregate: employee
+    producer: [employee_lifecycle]
+    consumers: []
+    required_context: [tenant_id]
+    consumer_requirements: [idempotent, tenant_context]
+
+  LeaveCancelled:
+    status: produced
+    aggregate: leave_application
+    producer: [leave]
+    consumers: []
+    required_context: [tenant_id, employee_id]
+    consumer_requirements: [idempotent, tenant_context]
+
+  DocumentUploaded:
+    status: produced
+    aggregate: document
+    producer: [documents]
+    consumers: []
+    required_context: [tenant_id]
+    consumer_requirements: [idempotent, tenant_context]
+
+  # Workflow (PRD s.16, s.23). All produced, none consumed yet: the contract exists so
+  # notifications can be built against it rather than against the approval engine's tables.
+  # WorkflowApproved/Rejected describe the approval reaching an outcome, once per instance;
+  # the domain's own events (LeaveApproved and friends) describe the entity. A consumer
+  # picks one, never both, or the same thing is announced twice.
+  WorkflowApproved:
+    status: produced
+    aggregate: workflow_instance
+    producer: [workflow]
+    consumers: []
+    required_context: [tenant_id]
+    consumer_requirements: [idempotent, tenant_context]
+
+  WorkflowRejected:
+    status: produced
+    aggregate: workflow_instance
+    producer: [workflow]
+    consumers: []
+    required_context: [tenant_id]
+    consumer_requirements: [idempotent, tenant_context]
+
+  WorkflowResubmitted:
+    status: produced
+    aggregate: workflow_instance
+    producer: [workflow]
+    consumers: []
+    required_context: [tenant_id]
+    consumer_requirements: [idempotent, tenant_context]
+
+  WorkflowFallbackActivated:
+    status: produced
+    aggregate: workflow_instance
+    producer: [workflow]
+    consumers: []
+    required_context: [tenant_id]
+    consumer_requirements: [idempotent, tenant_context]
+
+  WorkflowEscalated:
+    status: produced
+    aggregate: workflow_instance
+    producer: [workflow]
+    consumers: []
+    required_context: [tenant_id]
+    consumer_requirements: [idempotent, tenant_context]
+
+  WorkflowEscalationFailed:
+    status: produced
+    aggregate: workflow_instance
+    producer: [workflow]
+    consumers: []
+    required_context: [tenant_id]
+    consumer_requirements: [idempotent, tenant_context]
+
+  WorkflowDelegated:
+    status: produced
+    aggregate: workflow_delegation
+    producer: [workflow]
+    consumers: []
+    required_context: [tenant_id]
+    consumer_requirements: [idempotent, tenant_context]
+
+  WorkflowDelegationRevoked:
+    status: produced
+    aggregate: workflow_delegation
+    producer: [workflow]
+    consumers: []
+    required_context: [tenant_id]
+    consumer_requirements: [idempotent, tenant_context]
+
+planned_events:
+  note: reserved in the contract for domains that are not built yet.
+  ExpenseClaimSubmitted: {aggregate: expense_claim, producer: [expense], consumers: [workflow, notification]}
+  ExpenseClaimApproved: {aggregate: expense_claim, producer: [expense], consumers: [notification, payroll]}
+
+queues:
+  note: logical queues implied by ArchitectureDiagram/02 and 06; exact names are a deployment decision
+  workforce-jobs: consumed by workforce-engine
+  payroll-jobs: consumed by payroll-engine
+  platform-jobs: consumed by apps/worker - notification, documents, orchestration
+  dlq_rule: every queue has a dead letter queue
+  local_driver: >-
+    QUEUE_DRIVER=local uses integration.local_queue_message, which reproduces
+    at-least-once delivery and the visibility timeout so idempotency bugs surface in
+    development rather than in production.
+  failure_policy: >-
+    A malformed envelope is deleted immediately (retrying cannot help, and without
+    tenant_id it cannot be processed safely). An unhandled event type is deleted so it
+    does not block the queue. A handler error is released with exponential backoff until
+    max receives, then left for the DLQ.

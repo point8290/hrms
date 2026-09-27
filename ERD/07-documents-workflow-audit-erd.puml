@@ -1,0 +1,128 @@
+@startuml HRMS_Documents_Workflow_Audit_ERD
+hide circle
+skinparam linetype ortho
+title HRMS PostgreSQL - Documents / Workflow / Audit ERD
+
+entity employee {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  employee_code : varchar
+}
+
+entity document {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  employee_id : uuid? <<FK>>
+  document_type : varchar
+  filename : varchar
+  content_type : varchar
+  s3_key : varchar
+  checksum : varchar
+  version : integer
+  status : varchar
+  uploaded_by : uuid
+  created_at : timestamptz
+}
+
+entity workflow_definition {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  name : varchar
+  entity_type : varchar
+  version : integer
+  definition_json : jsonb
+  status : varchar
+}
+
+entity workflow_instance {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  definition_id : uuid <<FK>>
+  entity_type : varchar
+  entity_id : uuid
+  status : varchar
+  started_at : timestamptz
+  completed_at : timestamptz?
+}
+
+entity approval_task {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  workflow_instance_id : uuid <<FK>>
+  approver_employee_id : uuid?
+  approver_role_id : uuid?
+  sequence_no : integer
+  status : varchar
+  decision : varchar?
+  decided_at : timestamptz?
+}
+
+entity notification {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  recipient_user_id : uuid
+  channel : varchar
+  template_code : varchar
+  status : varchar
+  provider_message_id : varchar?
+  retry_count : integer
+  sent_at : timestamptz?
+}
+
+entity audit_log {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  actor_user_id : uuid?
+  entity_type : varchar
+  entity_id : uuid
+  action : varchar
+  before_state : jsonb?
+  after_state : jsonb?
+  request_id : varchar?
+  correlation_id : varchar?
+  created_at : timestamptz
+}
+
+entity event_outbox {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  event_id : uuid <<UK>>
+  event_type : varchar
+  aggregate_type : varchar
+  aggregate_id : uuid
+  schema_version : integer
+  payload : jsonb
+  occurred_at : timestamptz
+  published_at : timestamptz?
+  retry_count : integer
+}
+
+entity processed_event {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  event_id : uuid
+  consumer_name : varchar
+  processed_at : timestamptz
+}
+
+employee ||--o{ document
+workflow_definition ||--o{ workflow_instance
+workflow_instance ||--o{ approval_task
+employee ||--o{ approval_task
+employee ||--o{ notification
+employee ||--o{ audit_log
+
+event_outbox ..> workflow_instance : events
+event_outbox ..> notification : events
+processed_event ..> event_outbox : consumer tracking
+
+@enduml

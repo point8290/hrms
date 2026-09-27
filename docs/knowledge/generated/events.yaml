@@ -1,0 +1,132 @@
+# GENERATED FILE - DO NOT EDIT.
+# Produced by scripts/knowledge/generate.mjs (npm run knowledge:update).
+# Structural facts only. Business meaning lives in the semantic maps.
+
+meta:
+  type: generated
+  event_count: 31
+  detection: PascalCase event-shaped string literals in source
+
+events:
+  AttendanceCalculated:
+    - apps/worker/test/consumer-settlement.test.ts
+    - packages/events/src/index.ts
+    - services/workforce-engine/app/main.py
+  AttendanceCloseRequested:
+    - apps/api/src/modules/workforce/close-schedule.ts
+    - packages/events/src/index.ts
+    - services/workforce-engine/app/main.py
+  AttendanceCorrectionApproved:
+    - apps/api/src/modules/workforce/service.ts
+    - packages/events/src/index.ts
+    - services/workforce-engine/app/main.py
+  CheckinRecorded:
+    - apps/api/src/modules/workforce/service.ts
+    - apps/api/test/integration/mvp-journey.test.ts
+    - packages/events/src/index.ts
+    - services/workforce-engine/app/main.py
+  DocumentUploaded:
+    - apps/api/src/modules/documents/routes.ts
+    - packages/events/src/index.ts
+  EmployeeCreated:
+    - apps/api/src/modules/core-hr/service.ts
+    - apps/api/test/integration/outbox.test.ts
+    - apps/api/test/integration/tenant-context.test.ts
+    - apps/api/test/integration/tenant-isolation.test.ts
+    - apps/worker/test/consumer-settlement.test.ts
+    - apps/worker/test/notification-catalogue.test.ts
+    - packages/events/src/index.ts
+  EmployeeSeparated:
+    - apps/api/src/modules/core-hr/service.ts
+    - packages/events/src/index.ts
+  EmployeeUpdated:
+    - apps/api/src/modules/core-hr/service.ts
+    - apps/api/test/integration/outbox.test.ts
+    - packages/events/src/index.ts
+  ExpenseClaimApproved:
+    - apps/api/src/modules/expense/service.ts
+    - packages/events/src/index.ts
+  ExpenseClaimRejected:
+    - apps/api/src/modules/expense/service.ts
+    - packages/events/src/index.ts
+  ExpenseClaimSubmitted:
+    - apps/api/src/modules/expense/service.ts
+    - apps/worker/test/notification-catalogue.test.ts
+    - packages/events/src/index.ts
+  LeaveApplied:
+    - apps/api/src/modules/leave/service.ts
+    - packages/events/src/index.ts
+  LeaveApproved:
+    - apps/api/src/modules/leave/service.ts
+    - apps/worker/test/notification-catalogue.test.ts
+    - packages/events/src/index.ts
+  LeaveCancelled:
+    - apps/api/src/modules/leave/service.ts
+    - packages/events/src/index.ts
+  LeaveRejected:
+    - apps/api/src/modules/leave/service.ts
+    - packages/events/src/index.ts
+  OnboardingCompleted:
+    - apps/api/src/modules/onboarding/service.ts
+    - packages/events/src/index.ts
+  OnboardingPlanCreated:
+    - apps/api/src/modules/onboarding/service.ts
+    - apps/worker/test/notification-catalogue.test.ts
+    - packages/events/src/index.ts
+  PayrollCalculated:
+    - apps/api/src/modules/payroll/service.ts
+    - packages/events/src/index.ts
+    - services/payroll-engine/app/main.py
+    - services/payroll-engine/tests/test_trace.py
+    - services/shared/hrms_engine/trace.py
+  PayrollFinalized:
+    - apps/api/src/modules/payroll/service.ts
+    - apps/worker/test/payslip-generation.test.ts
+    - packages/events/src/index.ts
+  PayrollRunCreated:
+    - apps/api/src/modules/payroll/service.ts
+    - packages/events/src/index.ts
+    - services/payroll-engine/app/main.py
+    - services/payroll-engine/tests/test_queue_dead_letter.py
+  PayslipRequested:
+    - services/payroll-engine/tests/test_queue_dead_letter.py
+  ReportRequested:
+    - apps/api/src/modules/reporting/service.ts
+    - apps/api/test/integration/reporting.test.ts
+    - packages/events/src/index.ts
+  SalarySlipGenerated:
+    - apps/worker/src/handlers.ts
+    - apps/worker/test/payslip-generation.test.ts
+    - packages/events/src/index.ts
+  WorkflowApproved:
+    - apps/api/src/modules/workflow/service.ts
+    - apps/api/test/integration/workflow-completion.test.ts
+    - packages/events/src/index.ts
+  WorkflowDelegated:
+    - apps/api/src/modules/workflow/service.ts
+    - apps/api/test/integration/workflow-completion.test.ts
+    - packages/events/src/index.ts
+  WorkflowDelegationRevoked:
+    - apps/api/src/modules/workflow/service.ts
+    - apps/api/test/integration/workflow-completion.test.ts
+    - packages/events/src/index.ts
+  WorkflowEscalated:
+    - apps/api/src/modules/workflow/service.ts
+    - apps/api/test/integration/workflow-completion.test.ts
+    - packages/events/src/index.ts
+  WorkflowEscalationFailed:
+    - apps/api/src/modules/workflow/service.ts
+    - apps/api/test/integration/workflow-completion.test.ts
+    - packages/events/src/index.ts
+  WorkflowFallbackActivated:
+    - apps/api/src/modules/workflow/service.ts
+    - apps/api/test/integration/workflow-completion.test.ts
+    - packages/events/src/index.ts
+  WorkflowRejected:
+    - apps/api/src/modules/workflow/service.ts
+    - apps/api/test/integration/workflow-completion.test.ts
+    - packages/events/src/index.ts
+  WorkflowResubmitted:
+    - apps/api/src/modules/workflow/service.ts
+    - apps/api/test/integration/workflow-completion.test.ts
+    - packages/events/src/index.ts

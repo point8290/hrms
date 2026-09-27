@@ -1,0 +1,245 @@
+@startuml HRMS_Full_Logical_ERD
+hide circle
+skinparam linetype ortho
+skinparam packageStyle rectangle
+title HRMS PostgreSQL - Full Logical ERD
+
+package "TENANCY / IDENTITY" {
+  entity tenant {
+    *id : uuid
+    --
+    name : varchar
+    slug : varchar
+  }
+  entity app_user {
+    *id : uuid
+    --
+    email : varchar
+  }
+  entity tenant_membership {
+    *id : uuid
+    --
+    tenant_id : uuid
+    user_id : uuid
+    status : varchar
+  }
+}
+
+package "CORE HR" {
+  entity employee {
+    *id : uuid
+    --
+    tenant_id : uuid
+    employee_code : varchar
+    manager_employee_id : uuid?
+    employment_status : varchar
+  }
+  entity employment_history {
+    *id : uuid
+    --
+    employee_id : uuid
+    effective_from : date
+    effective_to : date?
+  }
+  entity department {
+    *id : uuid
+    --
+    tenant_id : uuid
+    parent_id : uuid?
+  }
+  entity designation {
+    *id : uuid
+    --
+    tenant_id : uuid
+    name : varchar
+  }
+  entity location {
+    *id : uuid
+    --
+    tenant_id : uuid
+    timezone : varchar
+  }
+}
+
+package "WORKFORCE" {
+  entity shift_type {
+    *id : uuid
+    --
+    tenant_id : uuid
+    start_time : time
+    end_time : time
+  }
+  entity shift_assignment {
+    *id : uuid
+    --
+    employee_id : uuid
+    effective_from : date
+  }
+  entity employee_checkin {
+    *id : uuid
+    --
+    employee_id : uuid
+    checkin_at : timestamptz
+    direction : varchar
+  }
+  entity attendance {
+    *id : uuid
+    --
+    employee_id : uuid
+    attendance_date : date
+    status : varchar
+  }
+}
+
+package "LEAVE" {
+  entity leave_type {
+    *id : uuid
+    --
+    tenant_id : uuid
+    name : varchar
+  }
+  entity leave_application {
+    *id : uuid
+    --
+    employee_id : uuid
+    status : varchar
+  }
+  entity leave_ledger_entry {
+    *id : uuid
+    --
+    employee_id : uuid
+    quantity : numeric
+    entry_type : varchar
+  }
+}
+
+package "COMPENSATION / PAYROLL" {
+  entity salary_structure {
+    *id : uuid
+    --
+    tenant_id : uuid
+    version : integer
+  }
+  entity salary_assignment {
+    *id : uuid
+    --
+    employee_id : uuid
+    effective_from : date
+  }
+  entity payroll_run {
+    *id : uuid
+    --
+    tenant_id : uuid
+    status : varchar
+  }
+  entity payroll_input_snapshot {
+    *id : uuid
+    --
+    payroll_run_id : uuid
+    employee_id : uuid
+  }
+  entity salary_slip {
+    *id : uuid
+    --
+    payroll_run_id : uuid
+    employee_id : uuid
+    net_amount : numeric
+  }
+}
+
+package "EXPENSE / PERFORMANCE" {
+  entity expense_claim {
+    *id : uuid
+    --
+    employee_id : uuid
+    status : varchar
+  }
+  entity performance_cycle {
+    *id : uuid
+    --
+    tenant_id : uuid
+    status : varchar
+  }
+  entity goal {
+    *id : uuid
+    --
+    employee_id : uuid
+    cycle_id : uuid
+  }
+}
+
+package "WORKFLOW / DOCUMENTS / AUDIT" {
+  entity document {
+    *id : uuid
+    --
+    tenant_id : uuid
+    employee_id : uuid?
+    s3_key : varchar
+  }
+  entity workflow_instance {
+    *id : uuid
+    --
+    tenant_id : uuid
+    entity_type : varchar
+    entity_id : uuid
+    status : varchar
+  }
+  entity approval_task {
+    *id : uuid
+    --
+    workflow_instance_id : uuid
+    status : varchar
+  }
+  entity audit_log {
+    *id : uuid
+    --
+    tenant_id : uuid
+    entity_type : varchar
+    entity_id : uuid
+    action : varchar
+  }
+  entity event_outbox {
+    *id : uuid
+    --
+    tenant_id : uuid
+    event_id : uuid
+    event_type : varchar
+  }
+}
+
+tenant ||--o{ tenant_membership
+app_user ||--o{ tenant_membership
+tenant ||--o{ employee
+employee ||--o{ employment_history
+employee ||--o{ shift_assignment
+shift_type ||--o{ shift_assignment
+employee ||--o{ employee_checkin
+employee ||--o{ attendance
+employee ||--o{ leave_application
+leave_type ||--o{ leave_application
+employee ||--o{ leave_ledger_entry
+leave_type ||--o{ leave_ledger_entry
+employee ||--o{ salary_assignment
+salary_structure ||--o{ salary_assignment
+payroll_run ||--o{ payroll_input_snapshot
+employee ||--o{ payroll_input_snapshot
+payroll_run ||--o{ salary_slip
+employee ||--o{ salary_slip
+employee ||--o{ expense_claim
+performance_cycle ||--o{ goal
+employee ||--o{ goal
+employee ||--o{ document
+workflow_instance ||--o{ approval_task
+employee ||--o{ approval_task
+employee ||--o{ audit_log
+
+employee_checkin ..> attendance : derives
+attendance ..> payroll_run : input
+leave_ledger_entry ..> payroll_run : LOP input
+salary_assignment ..> payroll_run : compensation input
+payroll_run ..> salary_slip : produces
+
+event_outbox ..> workflow_instance
+event_outbox ..> audit_log
+
+@enduml

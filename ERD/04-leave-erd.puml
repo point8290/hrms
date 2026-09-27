@@ -1,0 +1,137 @@
+@startuml HRMS_Leave_ERD
+hide circle
+skinparam linetype ortho
+title HRMS PostgreSQL - Leave ERD
+
+entity employee {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  employee_code : varchar
+}
+
+entity leave_type {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  name : varchar
+  unit : varchar
+  allow_half_day : boolean
+  allow_negative : boolean
+  carry_forward_enabled : boolean
+  encashment_enabled : boolean
+}
+
+entity leave_policy {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  name : varchar
+  effective_from : date
+  effective_to : date?
+}
+
+entity leave_policy_rule {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  leave_policy_id : uuid <<FK>>
+  leave_type_id : uuid <<FK>>
+  annual_allocation : numeric
+  accrual_frequency : varchar
+  max_carry_forward : numeric
+  expiry_days : integer?
+}
+
+entity leave_policy_assignment {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  employee_id : uuid <<FK>>
+  leave_policy_id : uuid <<FK>>
+  effective_from : date
+  effective_to : date?
+}
+
+entity leave_allocation {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  employee_id : uuid <<FK>>
+  leave_type_id : uuid <<FK>>
+  quantity : numeric
+  period_start : date
+  period_end : date
+  source : varchar
+}
+
+entity leave_application {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  employee_id : uuid <<FK>>
+  leave_type_id : uuid <<FK>>
+  start_date : date
+  end_date : date
+  quantity : numeric
+  status : varchar
+  reason : text
+  approved_by : uuid?
+}
+
+entity leave_ledger_entry {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  employee_id : uuid <<FK>>
+  leave_type_id : uuid <<FK>>
+  source_type : varchar
+  source_id : uuid?
+  entry_type : varchar
+  quantity : numeric
+  effective_date : date
+  created_at : timestamptz
+}
+
+entity leave_encashment {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  employee_id : uuid <<FK>>
+  leave_type_id : uuid <<FK>>
+  quantity : numeric
+  amount : numeric
+  status : varchar
+}
+
+entity holiday_list {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  name : varchar
+  year : integer
+}
+
+entity holiday {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  holiday_list_id : uuid <<FK>>
+  holiday_date : date
+  name : varchar
+}
+
+employee ||--o{ leave_policy_assignment
+leave_policy ||--o{ leave_policy_assignment
+leave_policy ||--o{ leave_policy_rule
+leave_type ||--o{ leave_policy_rule
+employee ||--o{ leave_allocation
+leave_type ||--o{ leave_allocation
+employee ||--o{ leave_application
+leave_type ||--o{ leave_application
+employee ||--o{ leave_ledger_entry
+leave_type ||--o{ leave_ledger_entry
+employee ||--o{ leave_encashment
+leave_type ||--o{ leave_encashment
+holiday_list ||--o{ holiday
+@enduml

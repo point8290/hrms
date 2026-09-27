@@ -1,0 +1,41 @@
+@startuml HRMS_Tenant_Context_Async
+title HRMS - Tenant Context in Asynchronous Workers
+
+participant "Producer / API" as Producer
+database PostgreSQL as DB
+queue "SQS" as SQS
+participant "Worker" as Worker
+participant "Connection Pool" as Pool
+
+Producer -> DB: BEGIN
+Producer -> DB: SET LOCAL app.tenant_id = tenant-A
+Producer -> DB: Business write
+Producer -> DB: INSERT outbox(event_id, tenant_id, ...)
+Producer -> DB: COMMIT
+
+Producer -> SQS: Publish event
+
+SQS --> Worker: {event_id, tenant_id, aggregate_id, payload}
+
+Worker -> Pool: Acquire connection
+Worker -> DB: BEGIN
+Worker -> DB: SET LOCAL app.tenant_id = message.tenant_id
+Worker -> DB: Check processed_event
+alt Already processed
+    DB --> Worker: Duplicate
+    Worker -> DB: ROLLBACK / no-op
+else New event
+    Worker -> DB: Execute tenant-scoped queries
+    Worker -> DB: Business write
+    Worker -> DB: INSERT processed_event
+    Worker -> DB: COMMIT
+    Worker -> SQS: ACK
+end
+
+note over Worker,DB
+Never rely on an HTTP JWT in a background worker.
+tenant_id must travel with the event.
+RLS remains active for worker queries.
+end note
+
+@enduml

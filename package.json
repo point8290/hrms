@@ -1,0 +1,34 @@
+{
+  "name": "hrms",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Multi-tenant SaaS HRMS",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "apps/api",
+    "apps/worker",
+    "apps/web",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run typecheck",
+    "dev:api": "npm run dev --workspace @hrms/api",
+    "dev:worker": "npm run dev --workspace @hrms/worker",
+    "db:migrate": "node --experimental-strip-types apps/api/src/infra/db/migrate.ts",
+    "knowledge:generate": "node scripts/knowledge/generate.mjs",
+    "knowledge:check": "node scripts/knowledge/validate.mjs",
+    "knowledge:update": "node scripts/knowledge/generate.mjs && node scripts/knowledge/validate.mjs",
+    "dev:web": "npm run dev --workspace @hrms/web",
+    "db:validate": "node scripts/db/validate-migrations.mjs",
+    "test:integration": "npm run test:integration --workspace @hrms/api",
+    "test:python": "npm run test:python:workforce && npm run test:python:payroll",
+    "test:python:workforce": "cd services/workforce-engine && python -m unittest discover -s tests -t tests",
+    "test:python:payroll": "cd services/payroll-engine && python -m unittest discover -s tests -t tests"
+  }
+}

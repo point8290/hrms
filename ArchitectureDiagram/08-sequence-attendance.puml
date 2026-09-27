@@ -1,0 +1,42 @@
+@startuml HRMS_Sequence_Attendance
+title HRMS - Attendance Processing Sequence
+
+actor Employee
+participant "Web / Mobile / Device" as Device
+participant "Node.js API" as API
+database PostgreSQL as DB
+queue "SQS" as SQS
+participant "FastAPI Workforce Engine" as Engine
+participant "Attendance Worker" as AW
+
+Employee -> Device: Check in
+Device -> API: POST /attendance/checkins
+API -> DB: BEGIN
+API -> DB: SET LOCAL app.tenant_id
+API -> DB: Insert immutable check-in
+API -> DB: Insert outbox event
+DB --> API: Commit
+API --> Device: 202 Accepted
+
+AW -> SQS: Consume CheckinRecorded
+SQS --> AW: Event with tenant_id + event_id
+AW -> DB: Establish tenant context
+AW -> DB: Check processed_event
+AW -> Engine: Process attendance job
+Engine -> DB: Load shift assignment
+Engine -> DB: Load check-ins
+Engine -> DB: Load approved leave
+Engine -> Engine: Resolve shift
+Engine -> Engine: Pair IN/OUT
+Engine -> Engine: Calculate hours / late / overtime
+Engine -> DB: Write attendance result
+Engine -> DB: Mark event processed
+Engine -> SQS: Ack
+
+note over Engine,DB
+Raw check-ins remain traceable.
+Derived attendance can be recalculated.
+Duplicate events must be idempotent.
+end note
+
+@enduml

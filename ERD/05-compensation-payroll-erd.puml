@@ -1,0 +1,292 @@
+@startuml HRMS_Compensation_Payroll_ERD
+hide circle
+skinparam linetype ortho
+title HRMS PostgreSQL - Compensation & Payroll ERD
+
+entity employee {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  employee_code : varchar
+}
+
+entity salary_component {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  code : varchar
+  name : varchar
+  component_type : varchar
+  calculation_type : varchar
+  taxable : boolean
+  statutory_type : varchar?
+  semantic_role : varchar?
+  --
+  note: semantic_role is what statute-aware
+  calculations match on (basic, house_rent_allowance).
+  Never the code or the display name (ADR-016)
+}
+
+entity salary_structure {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  name : varchar
+  version : integer
+  effective_from : date
+  effective_to : date?
+}
+
+entity salary_structure_component {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  salary_structure_id : uuid <<FK>>
+  salary_component_id : uuid <<FK>>
+  sequence_no : integer
+  formula : text?
+  fixed_amount : numeric?
+  percentage : numeric?
+}
+
+entity salary_assignment {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  employee_id : uuid <<FK>>
+  salary_structure_id : uuid <<FK>>
+  effective_from : date
+  effective_to : date?
+  annual_ctc : numeric
+}
+
+entity compensation_revision {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  employee_id : uuid <<FK>>
+  previous_assignment_id : uuid?
+  new_assignment_id : uuid
+  effective_date : date
+  reason : text
+}
+
+entity additional_salary {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  employee_id : uuid <<FK>>
+  salary_component_id : uuid <<FK>>
+  amount : numeric
+  effective_date : date
+  status : varchar
+}
+
+entity tax_declaration {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  employee_id : uuid <<FK>>
+  financial_year : varchar
+  regime : varchar
+  declared_amount : numeric
+  status : varchar
+}
+
+entity tax_exemption_rule {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid?
+  section_code : varchar
+  version : integer
+  effective_from : date
+  effective_to : date?
+  max_amount : numeric
+  applicable_regimes : text[]
+  --
+  note: tenant_id NULL = platform default.
+  Resolved by TAX YEAR, never by section code
+  alone; no two rules for one section may
+  overlap in time (ADR-017)
+}
+
+entity tax_declaration_item {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  tax_declaration_id : uuid <<FK>>
+  employee_id : uuid <<FK>>
+  tax_year_id : uuid <<FK>>
+  section_code : varchar
+  declared_amount : numeric
+  verified_amount : numeric?
+  status : varchar
+  previous_status : varchar?
+  verified_by : uuid?
+  verified_at : timestamptz?
+  proof_outcome_reason : text?
+  --
+  note: verified_amount is the ELIGIBLE amount,
+  which is not the statutory cap: eligibility
+  narrows, the ceiling then limits (ADR-017).
+  status is declared/verified/rejected; a fourth
+  state UNVERIFIED is derived per payroll run once
+  the tax year's proof cutoff has passed (ADR-018).
+  Amendable all year, including after payroll is
+  finalized - the finalized slip keeps its snapshot
+}
+
+entity rent_declaration {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  employee_id : uuid <<FK>>
+  tax_year_id : uuid <<FK>>
+  period_start : date
+  period_end : date
+  monthly_rent : numeric
+  metro_classification : varchar?
+  status : varchar
+  verified_monthly_rent : numeric?
+  --
+  note: effective-dated, non-overlapping per employee.
+  The HRA exemption is a period calculation on the rent
+  that applied to that period (ADR-016)
+}
+
+entity payroll_period {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  name : varchar
+  period_start : date
+  period_end : date
+  status : varchar
+}
+
+entity payroll_run {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  payroll_period_id : uuid <<FK>>
+  status : varchar
+  calculation_version : varchar
+  started_at : timestamptz?
+  finalized_at : timestamptz?
+}
+
+entity payroll_employee {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  payroll_run_id : uuid <<FK>>
+  employee_id : uuid <<FK>>
+  status : varchar
+  gross_amount : numeric
+  deduction_amount : numeric
+  tax_amount : numeric
+  net_amount : numeric
+}
+
+entity payroll_input_snapshot {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  payroll_run_id : uuid <<FK>>
+  employee_id : uuid <<FK>>
+  snapshot_version : integer
+  attendance_json : jsonb
+  leave_json : jsonb
+  compensation_json : jsonb
+  tax_json : jsonb
+  hra_json : jsonb
+  exemption_json : jsonb
+  benefits_json : jsonb
+  --
+  note: hra_json carries the period's rent and metro
+  classification plus a per-segment plan of the
+  remaining periods, so the engine never reads a
+  rent declaration, a location or a salary (ADR-016)
+}
+
+entity salary_slip {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  payroll_run_id : uuid <<FK>>
+  payroll_employee_id : uuid <<FK>>
+  employee_id : uuid <<FK>>
+  gross_amount : numeric
+  deduction_amount : numeric
+  tax_amount : numeric
+  net_amount : numeric
+  calculation_version : varchar
+  status : varchar
+  finalized_at : timestamptz?
+}
+
+entity salary_slip_component {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  salary_slip_id : uuid <<FK>>
+  salary_component_id : uuid <<FK>>
+  component_name_snapshot : varchar
+  amount : numeric
+  calculation_detail : jsonb
+}
+
+entity employee_tax_opening {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  employee_id : uuid <<FK>>
+  financial_year : text
+  opening_taxable_earnings : numeric
+  opening_tds : numeric
+  source : text
+  --
+  note: previous-employer facts; frozen into every
+  payroll snapshot, amendable until a slip in the
+  year is finalized (ADR-014)
+}
+
+entity statutory_rule {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid?
+  country_code : varchar
+  state_code : varchar?
+  rule_type : varchar
+  version : integer
+  effective_from : date
+  effective_to : date?
+  rule_config : jsonb
+}
+
+employee ||--o{ salary_assignment
+salary_structure ||--o{ salary_assignment
+salary_structure ||--o{ salary_structure_component
+salary_component ||--o{ salary_structure_component
+employee ||--o{ compensation_revision
+employee ||--o{ additional_salary
+salary_component ||--o{ additional_salary
+employee ||--o{ tax_declaration
+employee ||--o{ rent_declaration
+tax_declaration ||--o{ tax_declaration_item
+employee ||--o{ tax_declaration_item
+
+payroll_period ||--o{ payroll_run
+payroll_run ||--o{ payroll_employee
+employee ||--o{ payroll_employee
+payroll_run ||--o{ payroll_input_snapshot
+employee ||--o{ payroll_input_snapshot
+payroll_employee ||--o| salary_slip
+salary_slip ||--o{ salary_slip_component
+salary_component ||--o{ salary_slip_component
+payroll_run ||--o{ salary_slip
+employee ||--o{ salary_slip
+employee ||--o{ employee_tax_opening
+additional_salary }o--|| leave_encashment : "source (encashment pays through payroll)"
+
+@enduml

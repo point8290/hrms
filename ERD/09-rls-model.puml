@@ -1,0 +1,32 @@
+@startuml HRMS_RLS_Model
+title HRMS PostgreSQL - Tenant RLS Model
+
+actor "User / Worker" as User
+participant "Node.js API / FastAPI Worker" as App
+database "PostgreSQL Connection" as Conn
+database "PostgreSQL RLS" as RLS
+database "Tenant Table" as Data
+
+User -> App: Request / Event
+App -> Conn: BEGIN
+App -> Conn: SET LOCAL app.tenant_id = tenant-A
+Conn -> RLS: SELECT employee WHERE ...
+RLS -> RLS: Evaluate tenant policy
+RLS -> Data: tenant_id = app.tenant_id
+Data --> RLS: Matching rows only
+RLS --> Conn: Tenant-scoped result
+Conn --> App: Result
+App -> Conn: COMMIT
+
+note over App,RLS
+The tenant context must be transaction-local.
+Do not keep tenant_id as a persistent connection setting.
+Connection pools may reuse connections across tenants.
+end note
+
+note over User,App
+SQS worker messages must carry tenant_id because
+there is no HTTP JWT in a background worker.
+end note
+
+@enduml

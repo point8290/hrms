@@ -1,0 +1,843 @@
+# SEMANTIC - derived from ERD/*.puml. Not a migration and not a column reference.
+# Read the ERD puml for full column lists; read this for semantics and ownership.
+#
+# provenance:
+#   table names, relationships, immutability and effective-dating -> ERD/
+#   schema assignment -> ERD/README.md "Suggested database schemas" applied per domain
+# flags:
+#   tenant_scoped    row carries tenant_id
+#   rls_required     postgres RLS policy mandatory
+#   immutable        append-only / no in-place update after write
+#   derived          recomputable from other tables, safe to rebuild
+#   source_of_truth  authoritative; loss is unrecoverable
+#   effective_dated  effective_from/effective_to temporal record
+#   partition_candidate  time-partition after real volume measurement
+
+meta:
+  type: semantic
+  schema_version: 1
+  database: single postgresql database, logical schemas
+  status: planned (no migrations exist yet)
+  isolation: RLS on every tenant_scoped table, transaction-local app.tenant_id
+
+schemas:
+  identity: tenant registry, users, membership, rbac
+  core: organization and employee master
+  recruitment: requisitions, candidates, onboarding (not yet modeled in ERD)
+  workforce: shifts, check-ins, attendance, timesheet, holidays
+  leave_mgmt: leave policy, allocation, application, ledger
+  expense: claims, lines, advances
+  compensation: components, structures, assignments, declarations
+  payroll: periods, runs, snapshots, slips, statutory rules
+  performance: cycles, goals, reviews
+  learning: courses, enrollment (not yet modeled in ERD)
+  workflow: definitions, instances, approval tasks
+  documents: document metadata
+  notification: notification delivery state
+  audit: audit log
+  integration: event outbox and processed events
+  analytics: report runs and their exports
+
+tables:
+
+  identity.tenant:
+    domain: tenant
+    tenant_scoped: false
+    rls_required: false
+    source_of_truth: true
+    note: the isolation root itself; platform-scoped, protected by role not RLS
+
+  identity.app_user:
+    domain: identity
+    tenant_scoped: false
+    rls_required: false
+    note: global identity; email unique globally, tenant access via tenant_membership
+
+  identity.tenant_membership:
+    domain: identity
+    tenant_scoped: true
+    rls_required: true
+    source_of_truth: true
+    relationships: {tenant: identity.tenant, user: identity.app_user}
+    note: the join that grants a user access to a tenant; source of jwt tenant claim
+
+  identity.role:
+    domain: identity
+    tenant_scoped: true
+    rls_required: true
+    relationships: {tenant: identity.tenant}
+
+  identity.permission:
+    domain: identity
+    tenant_scoped: false
+    rls_required: false
+    note: global permission codes
+
+  identity.role_permission:
+    domain: identity
+    tenant_scoped: true
+    rls_required: true
+    relationships: {role: identity.role, permission: identity.permission}
+
+  identity.membership_role:
+    domain: identity
+    tenant_scoped: true
+    rls_required: true
+    relationships: {membership: identity.tenant_membership, role: identity.role}
+
+  core.company:
+    domain: tenant
+    tenant_scoped: true
+    rls_required: true
+    note: legal entity
+
+  core.branch:
+    domain: tenant
+    tenant_scoped: true
+    rls_required: true
+    relationships: {company: core.company, location: core.location}
+
+  core.location:
+    domain: tenant
+    tenant_scoped: true
+    rls_required: true
+    note: carries timezone used by attendance and holiday resolution
+
+  core.department:
+    domain: tenant
+    tenant_scoped: true
+    rls_required: true
+    relationships: {parent: core.department}
+
+  core.designation:
+    domain: tenant
+    tenant_scoped: true
+    rls_required: true
+
+  core.employee:
+    domain: core_hr
+    tenant_scoped: true
+    rls_required: true
+    source_of_truth: true
+    relationships:
+      user: identity.app_user
+      company: core.company
+      branch: core.branch
+      department: core.department
+      designation: core.designation
+      manager: core.employee
+    note: employee_code unique per tenant; current-state columns are denormalized from employment_history
+    index_hint: (tenant_id, employment_status)
+
+  core.employment_history:
+    domain: core_hr
+    tenant_scoped: true
+    rls_required: true
+    effective_dated: true
+    source_of_truth: true
+    relationships: {employee: core.employee}
+    note: authoritative history of department/designation/manager/employment_type
+
+  core.bank_account:
+    domain: core_hr
+    tenant_scoped: true
+    rls_required: true
+    effective_dated: true
+    sensitive: true
+    relationships: {employee: core.employee}
+    note: account number encrypted at rest; changes must be audited
+
+  core.tax_profile:
+    domain: core_hr
+    tenant_scoped: true
+    rls_required: true
+    effective_dated: true
+    sensitive: true
+    relationships: {employee: core.employee}
+
+  identity.refresh_token:
+    domain: identity
+    tenant_scoped: true
+    rls_required: true
+    note: >-
+      Tokens are stored hashed, never in clear. Rotated on every use; presenting a rotated
+      token revokes every session for that user, which is how token theft surfaces.
+    relationships: {user: identity.app_user}
+
+  identity.tenant_purge_log:
+    domain: integration
+    tenant_scoped: false
+    rls_required: false
+    rls_exempt_reason: platform evidence of an erasure; must outlive the tenant it names
+    immutable: true
+    note: >-
+      Written by identity.purge_tenant before the cascade. Deliberately not tenant-scoped:
+      it is the record that a tenant was erased, so it cannot live inside that tenant.
+
+  integration.local_queue_message:
+    domain: integration
+    tenant_scoped: false
+    rls_required: false
+    rls_exempt_reason: transport, not business data; reachable only by the platform role
+    note: >-
+      Development and test transport that reproduces the two SQS properties the code has
+      to survive - at-least-once delivery and a visibility timeout. Replaced by SQS in AWS.
+
+  core.emergency_contact:
+    domain: core_hr
+    tenant_scoped: true
+    rls_required: true
+    relationships: {employee: core.employee}
+
+  workforce.shift_type:
+    domain: shift
+    tenant_scoped: true
+    rls_required: true
+    note: crosses_midnight, grace_in/out, overtime_enabled drive attendance calculation
+
+  workforce.shift_assignment:
+    domain: shift
+    tenant_scoped: true
+    rls_required: true
+    effective_dated: true
+    relationships: {employee: core.employee, shift_type: workforce.shift_type}
+    note: must not overlap for the same employee
+
+  workforce.employee_checkin:
+    domain: attendance
+    tenant_scoped: true
+    rls_required: true
+    immutable: true
+    source_of_truth: true
+    partition_candidate: true
+    relationships: {employee: core.employee}
+    note: observed device/web/api fact; external_event_id used for ingest dedupe
+    index_hint: (tenant_id, employee_id, checkin_at)
+
+  workforce.attendance:
+    domain: attendance
+    tenant_scoped: true
+    rls_required: true
+    derived: true
+    source_of_truth: false
+    relationships:
+      employee: core.employee
+      shift_assignment: workforce.shift_assignment
+      source_checkins: workforce.employee_checkin
+    note: recomputable from check-ins + shift + leave; carries calculation_version
+    index_hint: (tenant_id, employee_id, attendance_date)
+
+  expense.expense_type:
+    domain: expense
+    tenant_scoped: true
+    rls_required: true
+    note: limit_amount caps one item; daily_limit_amount caps a date across every claim
+
+  expense.expense_claim:
+    domain: expense
+    tenant_scoped: true
+    rls_required: true
+    source_of_truth: true
+    immutable_after_payment: true
+    relationships: {employee: core.employee}
+    note: >-
+      States draft>submitted>manager_review>finance_review>approved>payment_pending>paid,
+      with rejected reachable from either review. A paid claim is immutable by trigger;
+      corrections use an adjustment claim.
+
+  expense.expense_line:
+    domain: expense
+    tenant_scoped: true
+    rls_required: true
+    relationships:
+      claim: expense.expense_claim
+      expense_type: expense.expense_type
+      receipt: documents.document
+    note: sanctioned_amount is NULL until finance decides, and can never exceed claimed_amount
+
+  expense.employee_advance:
+    domain: expense
+    tenant_scoped: true
+    rls_required: true
+    relationships: {employee: core.employee}
+    note: outstanding = paid_amount - claimed_amount - returned_amount, enforced by CHECK
+
+  expense.advance_settlement:
+    domain: expense
+    tenant_scoped: true
+    rls_required: true
+    immutable: true
+    relationships:
+      claim: expense.expense_claim
+      advance: expense.employee_advance
+    note: >-
+      Append-only. Reversing a settlement appends a negative row rather than editing, so an
+      advance balance is always explainable from its history and not just its current value.
+
+  recruitment.onboarding_template:
+    domain: onboarding
+    tenant_scoped: true
+    rls_required: true
+    note: department/designation/employment_type narrow the match; most specific wins
+
+  recruitment.onboarding_template_task:
+    domain: onboarding
+    tenant_scoped: true
+    rls_required: true
+    relationships: {template: recruitment.onboarding_template}
+    note: due_offset_days may be negative - asset ordering happens before day one
+
+  recruitment.onboarding_plan:
+    domain: onboarding
+    tenant_scoped: true
+    rls_required: true
+    relationships: {employee: core.employee, template: recruitment.onboarding_template}
+    note: one live plan per employee; completes when no mandatory task is outstanding
+
+  recruitment.onboarding_task:
+    domain: onboarding
+    tenant_scoped: true
+    rls_required: true
+    relationships:
+      plan: recruitment.onboarding_plan
+      owner: core.employee
+      document: documents.document
+    note: >-
+      Owner is resolved at plan time and stored, so a later manager change does not move a
+      task retroactively. requires_document_type gates completion on a real document.
+
+  identity.auth_token:
+    domain: identity
+    tenant_scoped: false
+    rls_required: false
+    rls_exempt_reason: global user identity; a reset must work before a tenant is chosen
+    note: >-
+      Password reset and email verification tokens, stored hashed and single use. Not
+      tenant-scoped because a person resetting their password has not chosen a workspace,
+      and asking would leak which workspaces they belong to.
+
+  leave_mgmt.leave_period_job:
+    domain: leave
+    tenant_scoped: true
+    rls_required: true
+    note: >-
+      Evidence that accrual, carry-forward or expiry ran for a period. The unique key uses
+      COALESCE on leave_type_id so a tenant-wide job (NULL) still conflicts with itself.
+
+  payroll.tax_exemption_rule:
+    domain: tax
+    tenant_scoped: false
+    rls_required: true
+    note: >-
+      Configured chapter VI-A sections (80C, 80D, 80CCD(1B)) and their ceilings. tenant_id NULL
+      is a platform default every tenant reads; a tenant row overrides it for that tenant only,
+      the same shape payroll.statutory_rule uses. Resolved by TAX YEAR rather than by section
+      code alone - against the year's first day, because a ceiling is an annual figure the
+      Finance Act sets for a whole year and letting it move in October would change an
+      employee's allowance between September and October payslips. A GIST exclusion constraint
+      stops two rules for one section overlapping in time.
+
+  compensation.tax_declaration_item:
+    domain: tax
+    tenant_scoped: true
+    rls_required: true
+    sensitive: true
+    relationships:
+      tax_declaration: compensation.tax_declaration
+      employee: core.employee
+      tax_year: payroll.tax_year
+    note: >-
+      One declared exemption per section per employee per tax year, hanging off the existing
+      compensation.tax_declaration which keeps the regime election and the lifecycle. Replaces
+      the free-form `declarations` jsonb, which could not be checked against any ceiling.
+      verified_amount is the ELIGIBLE amount a verifier accepted, which is a different question
+      from the statutory cap: eligibility narrows what was declared, the ceiling then limits
+      what is allowed. One live row per section - amending replaces, and the previous figure
+      lives in the audit trail.
+      status carries three stored states (declared/verified/rejected); a fourth, UNVERIFIED, is
+      derived per payroll run when the tax year's proof_cutoff_date has passed and the row is
+      still merely declared. It is not stored because whether the cutoff has passed is a fact
+      about the run, not the row. verified_by / verified_at / proof_outcome_reason /
+      previous_status record who decided, when, why and what it was before (ADR-018).
+      Amendable throughout the open tax year even after payroll is finalized: the finalized
+      slips keep what their snapshots froze.
+
+  compensation.rent_declaration:
+    domain: tax
+    tenant_scoped: true
+    rls_required: true
+    sensitive: true
+    relationships: {employee: core.employee, tax_year: payroll.tax_year}
+    note: >-
+      Rent an employee declares for a stretch of a tax year, for the HRA exemption under
+      section 10(13A). Effective-dated rather than one figure per year, because rent genuinely
+      changes mid-year - people move, and a lease renews - and the exemption is calculated per
+      payroll period on the rent that applied to that period. A GIST exclusion constraint stops
+      two declarations covering the same day, because rent for a given day decides how much tax
+      is withheld and must have one answer. status carries the proof lifecycle that phase 4
+      acts on: declared (stated but unproved), verified (proof accepted, verified_monthly_rent
+      is the authority), rejected (proof refused, contributes nothing).
+
+  payroll.tax_year:
+    domain: tax
+    tenant_scoped: true
+    rls_required: true
+    relationships: {}
+    note: >-
+      The year income tax is assessed over, as its own record rather than something derived
+      from a date and the tenant's fy_start_month. A year contains many payroll periods, and
+      almost everything statutory - exemption caps, the proof cutoff, surcharge slabs,
+      opening balances - is a fact about the year rather than the month. A GIST exclusion
+      constraint keeps two years from overlapping, because "which year is this period in"
+      decides how much tax is withheld and must have one answer.
+
+  payroll.tenant_payroll_policy:
+    domain: payroll
+    tenant_scoped: true
+    rls_required: true
+    relationships: {}
+    note: >-
+      Tenant choices that change what a payslip says - the working-days basis LOP is
+      pro-rated against, and whether an unproved declaration still reduces tax after the
+      cutoff. One row per tenant, created lazily, with defaults that reproduce the behaviour
+      from before the row existed: a policy table must not silently reprice anyone.
+      Two distinct proof settings: require_proof_after_cutoff (default true) is whether an
+      unproved declaration lapses once a cutoff has passed; require_proof_cutoff (default
+      false, opt-in) is whether a cutoff must be configured at all, and is the only thing
+      that turns a missing date into a per-employee failure rather than "no cutoff" (ADR-018).
+      require_professional_tax (default false, opt-in) makes an employee whose resolved PT
+      state has no configured rule a per-employee failure rather than a zero deduction; an
+      explicit tax_profile.pt_state_code already makes PT mandatory on its own (ADR-020).
+
+  payroll.employee_tax_opening:
+    domain: tax
+    tenant_scoped: true
+    rls_required: true
+    sensitive: true
+    relationships: {employee: core.employee}
+    note: >-
+      What an employee brought into the financial year from a previous employer - taxable
+      income and TDS already withheld. Both are needed together: without the income a
+      mid-year joiner is under-deducted all year, and without the TDS we would re-collect
+      tax someone else already took. Frozen into every payroll snapshot, and amendable only
+      until a slip in that year is finalized.
+
+  payroll.payment_batch:
+    domain: payroll
+    tenant_scoped: true
+    rls_required: true
+    sensitive: true
+    relationships: {run: payroll.payroll_run, document: documents.document}
+    note: >-
+      Only built from a finalized run. `excluded` lists employees left out and why - they
+      are owed money, so the gap is recorded rather than silently dropped.
+
+  payroll.payment_line:
+    domain: payroll
+    tenant_scoped: true
+    rls_required: true
+    sensitive: true
+    relationships:
+      batch: payroll.payment_batch
+      employee: core.employee
+      slip: payroll.salary_slip
+    note: >-
+      Bank details are snapshotted, and only the last four digits are kept. A bank account
+      changed after the file went to the bank must not redirect a payment in flight, and a
+      returned payment has to be explainable against the details actually used.
+
+  integration.scheduled_job:
+    domain: integration
+    tenant_scoped: true
+    rls_required: true
+    source_of_truth: true
+    note: >-
+      Every periodic job keyed by a tenant and a date (ADR-011): attendance close, leave
+      accrual, leave carry-forward. Replaced workforce.attendance_close_run in 0019, rows
+      backfilled rather than recreated because they are the evidence payroll reads to refuse
+      a run built on unevaluated days. UNIQUE (tenant_id, job_type, execution_date, job_key)
+      makes scheduling idempotent; job_key is NOT NULL DEFAULT '' so a tenant-wide job still
+      conflicts with itself. execution_date is the date the job is *for*, not when it ran.
+    index_hint: (available_at, job_type) WHERE status IN ('pending','failed')
+
+  identity.user_mfa:
+    domain: identity
+    tenant_scoped: false
+    rls_required: false
+    sensitive: true
+    rls_exempt_reason: global user credential; a person has one authenticator across every tenant
+    note: >-
+      One TOTP authenticator per person (ADR-012). The secret is stored encrypted rather than
+      hashed because verification needs it, so a stolen dump is not immediately a set of
+      working authenticators. last_used_counter makes every code single-use inside its own
+      thirty-second window. `pending` until a first code proves the app was actually scanned.
+
+  identity.mfa_recovery_code:
+    domain: identity
+    tenant_scoped: false
+    rls_required: false
+    sensitive: true
+    rls_exempt_reason: belongs to the global user record, like user_mfa
+    note: >-
+      Hashed like passwords, shown exactly once, single use, and deleted wholesale on
+      re-enrolment. A recovery code is a credential; a readable list of them in the database
+      would be a bypass of the factor it backs up.
+
+  workforce.attendance_correction:
+    domain: attendance
+    tenant_scoped: true
+    rls_required: true
+    source_of_truth: true
+    relationships: {attendance: workforce.attendance, employee: core.employee}
+    note: request+approval record; approval triggers recalculation, never edits check-ins
+
+  workforce.holiday_list:
+    domain: workforce
+    tenant_scoped: true
+    rls_required: true
+
+  workforce.holiday:
+    domain: workforce
+    tenant_scoped: true
+    rls_required: true
+    relationships: {holiday_list: workforce.holiday_list, location: core.location}
+
+  leave_mgmt.leave_type:
+    domain: leave
+    tenant_scoped: true
+    rls_required: true
+    note: flags for half_day, negative balance, carry_forward, encashment
+
+  leave_mgmt.leave_policy:
+    domain: leave
+    tenant_scoped: true
+    rls_required: true
+    effective_dated: true
+
+  leave_mgmt.leave_policy_rule:
+    domain: leave
+    tenant_scoped: true
+    rls_required: true
+    relationships: {leave_policy: leave_mgmt.leave_policy, leave_type: leave_mgmt.leave_type}
+    note: annual_allocation, accrual_frequency, max_carry_forward, expiry_days
+
+  leave_mgmt.leave_policy_assignment:
+    domain: leave
+    tenant_scoped: true
+    rls_required: true
+    effective_dated: true
+    relationships: {employee: core.employee, leave_policy: leave_mgmt.leave_policy}
+
+  leave_mgmt.leave_allocation:
+    domain: leave
+    tenant_scoped: true
+    rls_required: true
+    relationships: {employee: core.employee, leave_type: leave_mgmt.leave_type}
+    note: allocation event for a period; must also produce a ledger entry
+
+  leave_mgmt.leave_application:
+    domain: leave
+    tenant_scoped: true
+    rls_required: true
+    source_of_truth: true
+    relationships: {employee: core.employee, leave_type: leave_mgmt.leave_type}
+    note: states DRAFT>SUBMITTED>PENDING_APPROVAL>APPROVED|REJECTED, APPROVED>CANCELLED
+    index_hint: (tenant_id, employee_id)
+
+  leave_mgmt.leave_ledger_entry:
+    domain: leave
+    tenant_scoped: true
+    rls_required: true
+    immutable: true
+    source_of_truth: true
+    relationships: {employee: core.employee, leave_type: leave_mgmt.leave_type}
+    note: THE balance authority; entry_type = allocation|consumption|adjustment|carry_forward|expiry|encashment. source_type/source_id point back to the cause. Reverse with a compensating entry, never update or delete.
+
+  leave_mgmt.leave_encashment:
+    domain: leave
+    tenant_scoped: true
+    rls_required: true
+    relationships: {employee: core.employee, leave_type: leave_mgmt.leave_type}
+    note: feeds payroll as an earning and the ledger as a consumption
+
+  compensation.salary_component:
+    domain: compensation
+    tenant_scoped: true
+    rls_required: true
+    note: component_type, calculation_type, taxable, statutory_type
+
+  compensation.salary_structure:
+    domain: compensation
+    tenant_scoped: true
+    rls_required: true
+    effective_dated: true
+    note: versioned
+
+  compensation.salary_structure_component:
+    domain: compensation
+    tenant_scoped: true
+    rls_required: true
+    relationships: {structure: compensation.salary_structure, component: compensation.salary_component}
+    note: formula | fixed_amount | percentage, evaluated in sequence_no order
+
+  compensation.salary_assignment:
+    domain: compensation
+    tenant_scoped: true
+    rls_required: true
+    effective_dated: true
+    sensitive: true
+    source_of_truth: true
+    relationships: {employee: core.employee, structure: compensation.salary_structure}
+    note: payroll resolves the assignment effective during the period, not the current row
+
+  compensation.compensation_revision:
+    domain: compensation
+    tenant_scoped: true
+    rls_required: true
+    sensitive: true
+    relationships: {employee: core.employee}
+
+  compensation.additional_salary:
+    domain: compensation
+    tenant_scoped: true
+    rls_required: true
+    relationships: {employee: core.employee, component: compensation.salary_component}
+    note: bonus, incentive, arrears - one-off payroll input
+
+  compensation.tax_declaration:
+    domain: tax
+    tenant_scoped: true
+    rls_required: true
+    sensitive: true
+    relationships: {employee: core.employee}
+
+  payroll.statutory_rule:
+    domain: tax
+    tenant_scoped: optional
+    rls_required: true
+    effective_dated: true
+    immutable_after_use: true
+    note: >-
+      tenant_id nullable for platform defaults; versioned rule_config jsonb. Never edit a
+      version consumed by a finalized run - add a new version and close the old one with
+      effective_to. For rule_type income_tax the config holds the whole rate structure for a
+      regime: slabs, standard deduction, rebate, cess and - from version 2 - surcharge bands
+      as explicit {threshold, rate, marginal_relief} data. Surcharge lives here rather than in
+      a table of its own because the bands move with the same Finance Act that moves the
+      slabs; versioning them apart would permit a version holding this year's slabs beside
+      last year's bands (ADR-019). The whole config is frozen into every payroll snapshot that
+      consumes it.
+      rule_type professional_tax is state-scoped via state_code and carries explicit
+      slabs, the wage basis they measure, an optional per-slab special-month instalment
+      and an optional annual ceiling. Supported states are Karnataka and Maharashtra; a
+      state with no rule is recorded on the snapshot as unsupported rather than deducting
+      zero silently (ADR-020).
+      rule_type pf carries the contribution rates, the wage ceiling and the component
+      codes that form the PF wage. None of those has a default in the engine: a rule
+      version missing one fails that employee rather than applying a rate nobody
+      configured, which is what the PRD means by rules rather than hard-coded logic
+      (ADR-021). VPF, EDLI and administrative charges are deliberately not modelled.
+      rule_type esi carries both contribution rates and the gross wage ceiling, and has
+      no state_code: ESI is national in the supported model. The ceiling is the
+      eligibility test rather than a cap - an employee whose period gross exceeds it is
+      outside the scheme - so a rule missing it fails that employee rather than
+      defaulting, which would silently decide who is insured (ADR-022).
+
+  payroll.payroll_period:
+    domain: payroll
+    tenant_scoped: true
+    rls_required: true
+
+  payroll.payroll_run:
+    domain: payroll
+    tenant_scoped: true
+    rls_required: true
+    source_of_truth: true
+    relationships: {period: payroll.payroll_period}
+    note: state machine owner; immutable once FINALIZED
+
+  payroll.payroll_employee:
+    domain: payroll
+    tenant_scoped: true
+    rls_required: true
+    relationships: {run: payroll.payroll_run, employee: core.employee}
+    index_hint: (tenant_id, payroll_run_id)
+
+  payroll.payroll_input_snapshot:
+    domain: payroll
+    tenant_scoped: true
+    rls_required: true
+    immutable: true
+    source_of_truth: true
+    relationships: {run: payroll.payroll_run, employee: core.employee}
+    note: frozen attendance/leave/compensation/tax/benefits json. The ONLY legitimate calculation input. Makes recalculation deterministic.
+
+  payroll.salary_slip:
+    domain: payroll
+    tenant_scoped: true
+    rls_required: true
+    sensitive: true
+    source_of_truth: true
+    immutable_after_finalization: true
+    relationships:
+      run: payroll.payroll_run
+      payroll_employee: payroll.payroll_employee
+      employee: core.employee
+    note: carries calculation_version; corrections create adjustment/reversal/supplementary records
+
+  payroll.salary_slip_component:
+    domain: payroll
+    tenant_scoped: true
+    rls_required: true
+    immutable_after_finalization: true
+    relationships: {slip: payroll.salary_slip, component: compensation.salary_component}
+    note: component_name_snapshot preserves the label even if the component is later renamed
+
+  documents.document:
+    domain: documents
+    tenant_scoped: true
+    rls_required: true
+    source_of_truth: false
+    relationships: {employee: core.employee}
+    note: metadata only; binary lives in private S3 under s3_key. Versioned with checksum.
+
+  workflow.workflow_definition:
+    domain: workflow
+    tenant_scoped: true
+    rls_required: true
+    note: versioned definition_json, keyed by entity_type
+
+  workflow.workflow_instance:
+    domain: workflow
+    tenant_scoped: true
+    rls_required: true
+    relationships: {definition: workflow.workflow_definition}
+    note: polymorphic entity_type + entity_id; keeps the definition version it started with
+
+  workflow.approval_task:
+    domain: workflow
+    tenant_scoped: true
+    rls_required: true
+    relationships: {instance: workflow.workflow_instance, approver: core.employee, approver_role: identity.role}
+
+  analytics.report_run:
+    domain: reporting
+    tenant_scoped: true
+    rls_required: true
+    source_of_truth: true
+    note: >-
+      one request for a report (PRD s.22); the async state and the exported document hang off
+      this row (PRD s.25). The export itself is an ordinary documents.document of type report.
+
+  workflow.workflow_delegation:
+    domain: workflow
+    tenant_scoped: true
+    rls_required: true
+    source_of_truth: true
+    note: >-
+      time-bounded, scoped authority for one user to act on another's approval tasks
+      (PRD s.16.6). Never a permission grant: the delegator's own authority is re-derived
+      at decision time, so a delegation from someone with no say confers none.
+
+  identity.tenant_branding:
+    domain: identity
+    tenant_scoped: true
+    rls_required: true
+    source_of_truth: true
+    note: >-
+      White-label configuration - name, logo, colour, density, radius. Consumed as design
+      tokens and never as CSS; there is deliberately no free-form stylesheet column. Read
+      before sign-in through identity.public_branding, a SECURITY DEFINER function returning
+      presentational columns for active tenants only.
+
+  notification.notification_preference:
+    domain: notification
+    tenant_scoped: true
+    rls_required: true
+    source_of_truth: true
+    note: >-
+      per-employee opt-out for a category and channel (PRD s.20). Only ever an opt-out - the
+      absence of a row means send - and it is never consulted for a mandatory category (s.18.4).
+
+  notification.notification:
+    domain: notification
+    tenant_scoped: true
+    rls_required: true
+    partition_candidate: true
+    relationships: {recipient: identity.app_user}
+    note: channel, template_code, retry_count, provider_message_id
+
+  audit.audit_log:
+    domain: audit
+    tenant_scoped: true
+    rls_required: true
+    immutable: true
+    source_of_truth: true
+    partition_candidate: true
+    note: append-only; before_state/after_state jsonb, request_id and correlation_id propagated
+
+  integration.event_outbox:
+    domain: integration
+    tenant_scoped: true
+    rls_required: true
+    immutable: true
+    partition_candidate: true
+    note: written in the SAME transaction as the business change; event_id unique; published_at set by the publisher
+
+  integration.processed_event:
+    domain: integration
+    tenant_scoped: true
+    rls_required: true
+    immutable: true
+    note: (event_id, consumer_name) uniqueness is the idempotency guard for every consumer
+
+# Modelled in the ERD for domains that are not implemented yet. Kept out of `tables:` so
+# that section describes only what a migration actually creates — a map that claims a table
+# which does not exist is worse than no map, because it will be believed.
+# Modelled in the ERD for domains that are not implemented yet. Kept out of `tables:` so
+# that section describes only what a migration actually creates - a map that claims a table
+# which does not exist is worse than no map, because it will be believed.
+planned_tables:
+
+  performance.performance_cycle:
+    domain: performance
+    tenant_scoped: true
+    rls_required: true
+
+  performance.goal:
+    domain: performance
+    tenant_scoped: true
+    rls_required: true
+    relationships: {cycle: performance.performance_cycle, employee: core.employee}
+
+  performance.performance_review:
+    domain: performance
+    tenant_scoped: true
+    rls_required: true
+    relationships: {cycle: performance.performance_cycle, employee: core.employee}
+
+  performance.feedback:
+    domain: performance
+    tenant_scoped: true
+    rls_required: true
+    relationships: {review: performance.performance_review}
+
+deliberately_not_built:
+  note: >-
+    Present in the ERD but intentionally absent from the schema. Listed here so the next
+    person does not "restore" them assuming an omission.
+  core.manager_assignment: >-
+    Superseded by core.employment_history, which already carries manager_employee_id as part
+    of the same effective-dated record as department and designation. Two parallel manager
+    timelines can disagree; one cannot.
+  workforce.timesheet: >-
+    Project/task time allocation is a different concept from attendance and needs project
+    and task entities that do not exist. Out of MVP scope; will need its own design.
+
+not_yet_modeled:
+  note: named in PRD s.26 but absent from the ERD; design before implementing
+  recruitment: [job_requisition, candidate, application, interview, offer]
+  onboarding: [onboarding_plan, onboarding_task]
+  benefits: [benefit_plan, benefit_enrollment]
+  learning: [course, enrollment]
+  core_hr: [emergency_contact]

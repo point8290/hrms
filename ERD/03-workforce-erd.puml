@@ -1,0 +1,111 @@
+@startuml HRMS_Workforce_ERD
+hide circle
+skinparam linetype ortho
+title HRMS PostgreSQL - Workforce / Attendance ERD
+
+entity employee {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  employee_code : varchar
+}
+
+entity shift_type {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  name : varchar
+  start_time : time
+  end_time : time
+  crosses_midnight : boolean
+  grace_in_minutes : integer
+  grace_out_minutes : integer
+  overtime_enabled : boolean
+}
+
+entity shift_assignment {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  employee_id : uuid <<FK>>
+  shift_type_id : uuid <<FK>>
+  effective_from : date
+  effective_to : date?
+  status : varchar
+}
+
+entity employee_checkin {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  employee_id : uuid <<FK>>
+  checkin_at : timestamptz
+  direction : varchar
+  device_id : varchar?
+  latitude : numeric?
+  longitude : numeric?
+  source : varchar
+  external_event_id : varchar?
+  created_at : timestamptz
+}
+
+entity attendance {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  employee_id : uuid <<FK>>
+  attendance_date : date
+  shift_assignment_id : uuid?
+  status : varchar
+  first_in_at : timestamptz?
+  last_out_at : timestamptz?
+  working_minutes : integer
+  late_minutes : integer
+  early_exit_minutes : integer
+  overtime_minutes : integer
+  calculation_version : varchar
+  calculated_at : timestamptz
+}
+
+entity attendance_correction {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  attendance_id : uuid <<FK>>
+  employee_id : uuid <<FK>>
+  requested_by : uuid
+  reason : text
+  proposed_in_at : timestamptz?
+  proposed_out_at : timestamptz?
+  status : varchar
+  approved_by : uuid?
+}
+
+entity holiday {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  holiday_date : date
+  name : varchar
+  location_id : uuid?
+}
+
+entity timesheet {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  employee_id : uuid <<FK>>
+  work_date : date
+  minutes : integer
+  status : varchar
+}
+
+employee ||--o{ shift_assignment
+shift_type ||--o{ shift_assignment
+employee ||--o{ employee_checkin
+employee ||--o{ attendance
+shift_assignment ||--o{ attendance
+attendance ||--o{ attendance_correction
+employee ||--o{ attendance_correction
+employee ||--o{ timesheet
+@enduml

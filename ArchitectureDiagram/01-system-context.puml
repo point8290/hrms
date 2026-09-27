@@ -1,0 +1,36 @@
+@startuml HRMS_System_Context
+!include <C4/C4_Context.puml>
+title HRMS - C4 System Context
+LAYOUT_WITH_LEGEND()
+
+Person(employee, "Employee", "Uses self-service features such as attendance, leave, expenses, documents and payslips.")
+Person(manager, "Manager", "Manages team attendance, leave, expenses and performance.")
+Person(hr, "HR Administrator", "Manages employees, organization, policies, onboarding and HR operations.")
+Person(payroll, "Payroll Administrator", "Runs payroll, reviews calculations and finalizes salary.")
+Person(finance, "Finance Administrator", "Reviews payroll, expenses, reimbursements and payment information.")
+Person(admin, "Tenant Administrator", "Configures tenant, users, roles, policies and integrations.")
+Person(recruiter, "Recruiter", "Manages job requisitions, candidates, interviews and offers.")
+
+System(hrms, "Multi-Tenant SaaS HRMS", "Cloud-based HR management platform for employee lifecycle, attendance, leave, compensation, payroll, expenses, performance and analytics.")
+
+System_Ext(identity, "Identity Provider", "Optional enterprise SSO / OAuth / SAML identity provider.")
+System_Ext(biometric, "Biometric / Attendance Devices", "Biometric devices and external attendance systems.")
+System_Ext(bank, "Bank / Payment System", "External banking or payment infrastructure used for salary payments.")
+System_Ext(accounting, "Accounting / ERP", "External accounting or ERP system.")
+System_Ext(calendar, "Calendar System", "External calendar platform for interviews, meetings and HR events.")
+System_Ext(email, "Email Infrastructure", "Email delivery infrastructure.")
+
+Rel(employee, hrms, "Uses")
+Rel(manager, hrms, "Uses")
+Rel(hr, hrms, "Administers")
+Rel(payroll, hrms, "Runs payroll")
+Rel(finance, hrms, "Manages financial HR operations")
+Rel(admin, hrms, "Configures")
+Rel(recruiter, hrms, "Manages recruitment")
+Rel(hrms, identity, "Authenticates users via")
+Rel(biometric, hrms, "Sends attendance events")
+Rel(hrms, bank, "Exports / submits salary payments")
+Rel(hrms, accounting, "Exports payroll / expense data")
+Rel(hrms, calendar, "Creates / synchronizes events")
+Rel(hrms, email, "Sends notifications")
+@enduml

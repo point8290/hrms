@@ -1,0 +1,317 @@
+# SEMANTIC - domain-level API ownership, not an endpoint reference.
+# Actual routes are regenerated into generated/api-routes.yaml (74 at last scan).
+#
+# status: implemented -> the routes exist and are exercised by tests or the demo
+# status: partial     -> some routes exist; `gaps` lists what does not
+# status: planned     -> boundary reserved, nothing built
+
+meta:
+  type: semantic
+  schema_version: 2
+  transport: REST over HTTPS
+  auth: >-
+    JWT bearer. The tenant is read from the signed token's `tid` claim and never from a
+    header, path or body - a client-supplied tenant would be a cross-tenant escalation.
+  tenant_rule: >-
+    Every handler that touches tenant data goes through inTenant(), which opens a
+    transaction and issues SET LOCAL app.tenant_id before the first query.
+  authorization: >-
+    Permission codes, not roles. Self-service permissions (*.read.self) are distinct from
+    the broad ones, so an employee can read their own record and nothing else.
+  error_shape: '{ error: { code, message, details?, request_id } }'
+  async_rule: >-
+    Long-running work returns 202 with the aggregate id. Check-in intake and payroll run
+    creation are both asynchronous; the request never blocks on calculation.
+
+apis:
+
+  tenant:
+    service: node-api
+    base_path: /api/tenants
+    status: implemented
+    module: tenant
+    routes:
+      - POST /api/tenants (unauthenticated signup, rate limited)
+      - GET /api/tenant
+      - GET /api/branding (unauthenticated, rate limited - sign-in screen branding)
+      - GET,PUT /api/tenant/branding (read by any member, write needs tenant.manage)
+      - GET,POST /api/companies
+      - GET,POST /api/locations
+      - GET,POST /api/departments
+      - GET,POST /api/designations
+      - GET,POST /api/branches
+      - GET,POST /api/holiday-lists
+      - GET /api/holiday-lists/:id/holidays
+    notes: >-
+      Tenant creation runs on the platform connection because no tenant context can exist
+      before the tenant does; everything after it is ordinary tenant-scoped work.
+
+  identity:
+    service: node-api
+    base_path: /api/auth
+    status: implemented
+    module: identity
+    routes:
+      - POST /api/auth/login
+      - POST /api/auth/refresh
+      - POST /api/auth/logout
+      - GET /api/auth/me
+      - POST /api/auth/forgot-password
+      - POST /api/auth/reset-password
+      - POST /api/auth/verify-email
+      - POST /api/auth/mfa/enroll
+      - POST /api/auth/mfa/confirm
+      - POST /api/auth/mfa/verify
+      - GET /api/account/mfa
+      - POST /api/account/mfa/enroll
+      - POST /api/account/mfa/confirm
+      - POST /api/account/mfa/disable
+      - POST /api/users
+      - GET /api/roles
+      - GET /api/permissions
+    notes: >-
+      Login can return a challenge instead of a session. `mfa_required` with
+      stage `verify` or `enroll` means the password was correct and the client must continue
+      with /api/auth/mfa/*; the challenge token has its own JWT audience, expires in five
+      minutes and carries no access (ADR-012). Anyone holding a permission the catalog marks
+      sensitive cannot complete a login without a second factor, and the requirement is
+      re-checked on every refresh.
+    gaps: [custom role creation, MFA in the web client]
+
+  core_hr:
+    service: node-api
+    base_path: /api/employees
+    status: implemented
+    module: core-hr
+    routes:
+      - POST /api/employees
+      - GET /api/employees
+      - GET /api/employees/:id
+      - GET /api/employees/:id/employment-history
+      - GET,PUT /api/employees/:id/bank-account
+      - PUT /api/employees/:id/tax-profile
+    sensitive: [bank-account, tax-profile]
+    notes: >-
+      The directory narrows to the caller's reporting line when they hold only
+      employee.read.team, resolved recursively so skip-level reports are included.
+
+  employee_lifecycle:
+    service: node-api
+    base_path: /api/employees/:id/lifecycle
+    status: implemented
+    module: core-hr
+    routes:
+      - POST /api/employees/:id/lifecycle
+      - POST /api/employees/:id/separate
+    notes: >-
+      Effective-dated. Closes the open employment_history row and opens a new one, which
+      is why a promotion today cannot alter last month's payroll.
+
+  shift:
+    service: node-api
+    base_path: /api/shift-types
+    status: implemented
+    module: workforce
+    routes: [GET,POST /api/shift-types, POST /api/shift-assignments]
+    notes: crosses_midnight is derived from the times rather than trusted from the caller.
+
+  attendance:
+    service: node-api
+    base_path: /api/attendance
+    status: implemented
+    module: workforce
+    routes:
+      - POST /api/attendance/checkins
+      - POST /api/attendance/checkins/bulk
+      - GET /api/attendance
+      - GET /api/attendance/checkins
+      - POST /api/attendance/recalculate
+      - GET,POST /api/attendance/corrections
+    notes: >-
+      Intake returns 202. Bulk intake reports per-row results so one malformed device row
+      cannot discard the batch.
+
+  leave:
+    service: node-api
+    base_path: /api/leave
+    status: implemented
+    module: leave
+    routes:
+      - GET,POST /api/leave/types
+      - POST /api/leave/allocations
+      - GET /api/leave/balance
+      - GET /api/leave/ledger
+      - GET,POST /api/leave/applications
+      - POST /api/leave/applications/:id/cancel
+      - POST /api/leave/adjustments
+    gaps: [leave policy assignment endpoints, encashment, carry-forward job]
+
+  workflow:
+    service: node-api
+    base_path: /api/workflows
+    status: implemented
+    module: workflow
+    routes:
+      - GET /api/workflows
+      - PUT /api/workflows/:entityType
+      - GET /api/approvals
+      - POST /api/approvals/:id/decision
+    notes: >-
+      A decision applies the outcome to the underlying entity in the same transaction, so
+      an approved leave can never exist without its ledger entry.
+
+  compensation:
+    service: node-api
+    base_path: /api/compensation
+    status: implemented
+    module: compensation
+    sensitive: true
+    routes:
+      - POST /api/compensation/components
+      - GET,POST /api/compensation/structures
+      - POST /api/compensation/assignments
+      - GET /api/compensation/assignments/:id
+      - POST /api/compensation/additional
+
+  payroll:
+    service: node-api
+    base_path: /api/payroll-runs
+    status: implemented
+    module: payroll
+    sensitive: true
+    routes:
+      - GET,POST /api/payroll-periods
+      - POST /api/payroll-runs
+      - GET /api/payroll-runs/:id
+      - GET /api/payroll-runs/:id/employees
+      - POST /api/payroll-runs/:id/review
+      - POST /api/payroll-runs/:id/approve
+      - POST /api/payroll-runs/:id/finalize
+      - POST /api/payroll-runs/:id/recalculate
+      - POST /api/payroll-runs/:id/cancel
+      - GET /api/payslips
+      - GET /api/payslips/:id
+    notes: >-
+      payroll.approve and payroll.finalize are separate permissions: finalization is the
+      irreversible step and is deliberately not implied by approval.
+
+  tax:
+    service: node-api
+    base_path: /api/payroll-runs
+    status: partial
+    module: payroll
+    gaps: [tax declaration submission, statutory rule administration endpoints]
+    notes: >-
+      Statutory rules are seeded by migration and pinned into payroll snapshots. There is
+      no API to edit them yet; a new version is added by migration.
+
+  documents:
+    service: node-api
+    base_path: /api/documents
+    status: implemented
+    module: documents
+    routes:
+      - POST /api/documents/upload-url
+      - POST /api/documents/:id/confirm
+      - GET /api/documents
+      - GET /api/documents/:id/download-url
+      - GET,PUT /internal/files/* (local storage driver only)
+    notes: >-
+      The API never carries the binary. Authorization is decided at URL-issue time, every
+      time, and sensitive document types require document.read even for the owner.
+
+  audit:
+    service: node-api
+    base_path: /api/audit
+    status: implemented
+    module: documents
+    routes: [GET /api/audit]
+    notes: Read-only; the table is append-only so there is no write path to expose.
+
+  onboarding:
+    service: node-api
+    base_path: /api/onboarding
+    status: planned
+    module: recruitment
+
+  recruitment:
+    service: node-api
+    base_path: /api/recruitment
+    status: planned
+    module: recruitment
+
+  expense:
+    service: node-api
+    base_path: /api/expenses
+    status: planned
+    module: expense
+
+  performance:
+    service: node-api
+    base_path: /api/performance
+    status: planned
+    module: performance
+
+  benefits:
+    service: node-api
+    base_path: /api/benefits
+    status: planned
+    module: benefits
+
+  learning:
+    service: node-api
+    base_path: /api/learning
+    status: planned
+    module: learning
+
+  notification:
+    service: node-api
+    base_path: /api/notifications
+    status: implemented
+    module: notification
+    notes: >-
+      Delivery is event-driven in the worker. The synchronous surface is the employee's own
+      in-app inbox and preferences, authorised by ownership rather than a permission - a
+      notification is addressed to one person, so the only question is whether the caller is
+      that person. There is deliberately no notification.admin.
+
+  workforce:
+    service: node-api
+    base_path: /api/attendance
+    status: implemented
+    module: workforce
+    notes: Umbrella context; its surface is the shift and attendance APIs above.
+
+  integration:
+    service: node-api
+    base_path: /api/attendance/checkins
+    status: implemented
+    module: event-publisher
+    health_routes:
+      - GET /health/live
+      - GET /health/ready
+      - GET /health/deps
+      - GET /health
+    notes: >-
+      The only inbound external surface is device check-in intake, which shares the normal
+      immutable intake path rather than having a privileged one of its own.
+
+      Health is three questions with three endpoints. /health/live touches no dependency, so
+      a database blip does not restart every task at once. /health/ready checks only the
+      database, because everything else has a degraded path. /health/deps is diagnostics and
+      always returns 200, so no load balancer acts on it. All are unauthenticated by
+      necessity and therefore carry no identifying detail: no host, bucket, queue URL or
+      connection string.
+
+internal_services:
+  note: Not public APIs. Invoked by SQS jobs; the browser never reaches them.
+  workforce-engine:
+    service: fastapi
+    status: implemented
+    surface: [GET /health, POST /internal/close-day]
+    trigger: sqs workforce-jobs
+  payroll-engine:
+    service: fastapi
+    status: implemented
+    surface: [GET /health]
+    trigger: sqs payroll-jobs

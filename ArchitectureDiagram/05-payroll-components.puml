@@ -1,0 +1,62 @@
+@startuml HRMS_Payroll_Components
+!include <C4/C4_Component.puml>
+title HRMS - Payroll Calculation Engine
+LAYOUT_WITH_LEGEND()
+
+ContainerQueue(sqs, "AWS SQS")
+ContainerDb(db, "PostgreSQL", "Multi-tenant PostgreSQL with RLS")
+
+Container_Boundary(payroll, "FastAPI Payroll Engine") {
+    Component(consumer, "Payroll Job Consumer", "Python", "Consumes payroll calculation jobs.")
+    Component(tenantContext, "Tenant Context", "Python", "Establishes tenant-scoped database context.")
+    Component(inputLoader, "Payroll Input Loader", "Python", "Loads payroll snapshot and calculation inputs.")
+    Component(attendanceProvider, "Attendance Input Provider", "Python", "Reads finalized attendance/LOP inputs.")
+    Component(leaveProvider, "Leave Input Provider", "Python", "Reads leave and LOP inputs.")
+    Component(compensationProvider, "Compensation Provider", "Python", "Loads effective-dated salary assignment.")
+    Component(taxEngine, "Tax Engine", "Python", "Calculates employee tax using versioned rules.")
+    Component(statutoryEngine, "Statutory Engine", "Python", "Calculates PF, ESI, PT and configured statutory deductions.")
+    Component(earningsEngine, "Earnings Engine", "Python", "Calculates basic, allowances, bonus, arrears and variable pay.")
+    Component(deductionEngine, "Deduction Engine", "Python", "Calculates deductions and LOP.")
+    Component(netPayEngine, "Net Pay Calculator", "Python", "Calculates gross, deductions and net salary.")
+    Component(resultValidator, "Payroll Result Validator", "Python", "Validates calculation consistency.")
+    Component(resultWriter, "Payroll Result Writer", "Python", "Persists salary slip snapshot and results.")
+    Component(eventPublisher, "Event Publisher", "Python", "Publishes PayrollCalculated / SalarySlipGenerated.")
+}
+
+Rel(sqs, consumer, "Payroll calculation job")
+Rel(consumer, tenantContext, "Establish tenant context")
+Rel(tenantContext, inputLoader, "Tenant-scoped execution")
+Rel(inputLoader, attendanceProvider, "Attendance")
+Rel(inputLoader, leaveProvider, "Leave / LOP")
+Rel(inputLoader, compensationProvider, "Compensation")
+Rel(attendanceProvider, db, "Read snapshot")
+Rel(leaveProvider, db, "Read snapshot")
+Rel(compensationProvider, db, "Read salary configuration")
+Rel(inputLoader, earningsEngine, "Inputs")
+Rel(inputLoader, deductionEngine, "Inputs")
+Rel(earningsEngine, statutoryEngine, "Earnings")
+Rel(deductionEngine, statutoryEngine, "Deduction inputs")
+Rel(statutoryEngine, taxEngine, "Taxable income")
+Rel(earningsEngine, netPayEngine, "Gross earnings")
+Rel(deductionEngine, netPayEngine, "Deductions")
+Rel(taxEngine, netPayEngine, "Tax")
+Rel(netPayEngine, resultValidator, "Calculated payroll")
+Rel(resultValidator, resultWriter, "Validated result")
+Rel(resultWriter, db, "Write immutable salary snapshot")
+Rel(resultWriter, eventPublisher, "PayrollCalculated")
+Rel(eventPublisher, sqs, "Publish event")
+
+note right of resultWriter
+  ADR-009 amends this diagram.
+
+  The engine writes the salary slip but does NOT
+  emit SalarySlipGenerated. At this point the slip
+  is still DRAFT and its figures can change, so a
+  document generated here could contradict what
+  is eventually paid.
+
+  SalarySlipGenerated is emitted per slip by the
+  Node worker AFTER PayrollFinalized, once the
+  slip is immutable.
+end note
+@enduml

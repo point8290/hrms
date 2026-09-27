@@ -1,0 +1,36 @@
+@startuml HRMS_Workforce_Components
+!include <C4/C4_Component.puml>
+title HRMS - Workforce Calculation Engine
+LAYOUT_WITH_LEGEND()
+
+ContainerQueue(sqs, "AWS SQS")
+ContainerDb(db, "PostgreSQL", "Multi-tenant database with RLS")
+
+Container_Boundary(workforce, "FastAPI Workforce Engine") {
+    Component(jobConsumer, "Job Consumer", "Python", "Consumes attendance/workforce jobs.")
+    Component(tenantContext, "Tenant Context", "Python", "Sets tenant database context.")
+    Component(shiftResolver, "Shift Resolver", "Python", "Determines applicable employee shift.")
+    Component(checkinProcessor, "Check-in Processor", "Python", "Validates and groups raw check-in events.")
+    Component(attendanceCalculator, "Attendance Calculator", "Python", "Calculates attendance status and working hours.")
+    Component(overtimeCalculator, "Overtime Calculator", "Python", "Calculates eligible overtime.")
+    Component(leaveResolver, "Leave Resolver", "Python", "Determines approved leave and LOP impact.")
+    Component(attendanceWriter, "Attendance Writer", "Python", "Persists calculated attendance.")
+    Component(eventPublisher, "Event Publisher", "Python", "Publishes attendance calculation events.")
+}
+
+Rel(sqs, jobConsumer, "Attendance job")
+Rel(jobConsumer, tenantContext, "Establish tenant context")
+Rel(tenantContext, shiftResolver, "Tenant-scoped execution")
+Rel(shiftResolver, db, "Read shift assignments")
+Rel(checkinProcessor, db, "Read check-ins")
+Rel(shiftResolver, checkinProcessor, "Resolved shift")
+Rel(checkinProcessor, attendanceCalculator, "Normalized check-ins")
+Rel(attendanceCalculator, leaveResolver, "Attendance date")
+Rel(leaveResolver, db, "Read approved leave")
+Rel(attendanceCalculator, overtimeCalculator, "Working hours")
+Rel(overtimeCalculator, attendanceWriter, "Calculated result")
+Rel(attendanceCalculator, attendanceWriter, "Calculated attendance")
+Rel(attendanceWriter, db, "Write attendance")
+Rel(attendanceWriter, eventPublisher, "AttendanceCalculated")
+Rel(eventPublisher, sqs, "Publish event")
+@enduml

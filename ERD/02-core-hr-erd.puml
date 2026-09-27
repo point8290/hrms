@@ -1,0 +1,197 @@
+@startuml HRMS_Core_HR_ERD
+hide circle
+skinparam linetype ortho
+title HRMS PostgreSQL - Core HR / Identity ERD
+
+entity tenant {
+  *id : uuid <<PK>>
+  --
+  name : varchar
+  slug : varchar <<UK>>
+  timezone : varchar
+  locale : varchar
+  currency : varchar
+  country_code : varchar
+  status : varchar
+  created_at : timestamptz
+}
+
+entity app_user {
+  *id : uuid <<PK>>
+  --
+  email : varchar <<UK>>
+  password_hash : varchar
+  status : varchar
+  created_at : timestamptz
+}
+
+entity tenant_membership {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid <<FK>>
+  user_id : uuid <<FK>>
+  status : varchar
+  joined_at : timestamptz
+}
+
+entity role {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid <<FK>>
+  name : varchar
+}
+
+entity permission {
+  *id : uuid <<PK>>
+  --
+  code : varchar <<UK>>
+  description : text
+}
+
+entity role_permission {
+  *role_id : uuid <<FK>>
+  *permission_id : uuid <<FK>>
+}
+
+entity membership_role {
+  *membership_id : uuid <<FK>>
+  *role_id : uuid <<FK>>
+}
+
+entity company {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid <<FK>>
+  name : varchar
+  legal_name : varchar
+  tax_identifier : varchar
+}
+
+entity branch {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid <<FK>>
+  company_id : uuid <<FK>>
+  name : varchar
+  location_id : uuid
+}
+
+entity location {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid <<FK>>
+  name : varchar
+  timezone : varchar
+}
+
+entity department {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid <<FK>>
+  parent_id : uuid?
+  name : varchar
+}
+
+entity designation {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid <<FK>>
+  name : varchar
+  grade : varchar
+}
+
+entity employee {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid <<FK>>
+  employee_code : varchar
+  user_id : uuid? <<FK>>
+  company_id : uuid <<FK>>
+  branch_id : uuid? <<FK>>
+  department_id : uuid? <<FK>>
+  designation_id : uuid? <<FK>>
+  manager_employee_id : uuid? <<FK>>
+  first_name : varchar
+  last_name : varchar
+  employment_status : varchar
+  joining_date : date
+  exit_date : date?
+}
+
+entity employment_history {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid <<FK>>
+  employee_id : uuid <<FK>>
+  company_id : uuid
+  department_id : uuid
+  designation_id : uuid
+  manager_employee_id : uuid?
+  employment_type : varchar
+  effective_from : date
+  effective_to : date?
+}
+
+entity manager_assignment {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid <<FK>>
+  employee_id : uuid <<FK>>
+  manager_employee_id : uuid <<FK>>
+  effective_from : date
+  effective_to : date?
+}
+
+entity bank_account {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid <<FK>>
+  employee_id : uuid <<FK>>
+  account_holder : varchar
+  account_number_encrypted : text
+  ifsc : varchar
+  is_primary : boolean
+  effective_from : date
+}
+
+entity tax_profile {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid <<FK>>
+  employee_id : uuid <<FK>>
+  tax_identifier : varchar
+  tax_regime : varchar
+  effective_from : date
+  effective_to : date?
+}
+
+tenant ||--o{ tenant_membership
+app_user ||--o{ tenant_membership
+tenant ||--o{ role
+role ||--o{ role_permission
+permission ||--o{ role_permission
+tenant_membership ||--o{ membership_role
+role ||--o{ membership_role
+
+tenant ||--o{ company
+company ||--o{ branch
+tenant ||--o{ branch
+tenant ||--o{ location
+tenant ||--o{ department
+department ||--o{ department : parent
+tenant ||--o{ designation
+
+tenant ||--o{ employee
+app_user ||--o| employee
+company ||--o{ employee
+branch ||--o{ employee
+department ||--o{ employee
+designation ||--o{ employee
+employee ||--o{ employee : manages
+
+employee ||--o{ employment_history
+employee ||--o{ manager_assignment
+employee ||--o{ bank_account
+employee ||--o{ tax_profile
+
+@enduml

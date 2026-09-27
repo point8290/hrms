@@ -1,0 +1,69 @@
+# GENERATED FILE - DO NOT EDIT.
+# Produced by scripts/knowledge/generate.mjs (npm run knowledge:update).
+# Structural facts only. Business meaning lives in the semantic maps.
+
+meta:
+  type: generated
+  scanned_files: 232
+  code_files: 188
+  implementation_present: true
+
+top_level:
+  .github: 1
+  Multi_Tenant_SaaS_HRMS_PRD.pdf: 1
+  README.md: 1
+  apps: 138
+  db: 37
+  docker-compose.yml: 1
+  infra: 16
+  package-lock.json: 1
+  package.json: 1
+  packages: 4
+  phase-1-completion-PRD.md: 1
+  prd_extracted.txt: 1
+  services: 28
+  tsconfig.base.json: 1
+
+workspaces:
+  - apps/api
+  - apps/web
+  - apps/worker
+  - services/payroll-engine
+  - services/shared
+  - services/workforce-engine
+  - packages/events
+
+node_modules_dirs:
+  - apps/api/src/modules/compensation
+  - apps/api/src/modules/core-hr
+  - apps/api/src/modules/documents
+  - apps/api/src/modules/expense
+  - apps/api/src/modules/identity
+  - apps/api/src/modules/leave
+  - apps/api/src/modules/notification
+  - apps/api/src/modules/onboarding
+  - apps/api/src/modules/payroll
+  - apps/api/src/modules/reporting
+  - apps/api/src/modules/tenant
+  - apps/api/src/modules/workflow
+  - apps/api/src/modules/workforce
+
+node_infra_dirs:
+  - apps/api/src/infra/db
+  - apps/api/src/infra/events
+  - apps/api/src/infra/scheduler
+
+python_packages:
+  - services/payroll-engine/app
+  - services/workforce-engine/app
+
+entrypoints:
+  - apps/api/src/http/app.ts
+  - apps/api/src/infra/scheduler/index.ts
+  - apps/api/src/server.ts
+  - apps/worker/src/main.ts
+  - packages/events/src/index.ts
+  - services/payroll-engine/app/main.py
+  - services/workforce-engine/app/main.py
+
+cross_module_imports: {}

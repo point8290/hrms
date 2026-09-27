@@ -1,0 +1,38 @@
+@startuml HRMS_Sequence_Onboarding
+title HRMS - Employee Onboarding Sequence
+
+actor HR
+participant "React Web" as UI
+participant "Node.js API" as API
+participant "Tenant Context / RLS" as RLS
+database PostgreSQL as DB
+queue "SQS" as SQS
+participant "Background Worker" as Worker
+participant "SES" as SES
+
+HR -> UI: Create employee
+UI -> API: POST /employees
+API -> RLS: Resolve tenant_id
+RLS -> DB: BEGIN + SET LOCAL app.tenant_id
+API -> DB: Create employee + onboarding record
+API -> DB: Insert audit event
+API -> DB: Insert outbox event
+DB --> API: Commit
+API --> UI: 201 Created
+
+Worker -> SQS: Consume EmployeeCreated
+SQS --> Worker: Event {tenant_id,event_id,...}
+Worker -> RLS: Establish tenant context
+Worker -> DB: Load onboarding tasks
+Worker -> DB: Create notification jobs
+Worker -> SES: Send onboarding email
+SES --> Worker: Delivery accepted
+Worker -> DB: Mark notification processed
+Worker -> SQS: Ack message
+
+note over API,DB
+Every tenant-owned transaction must establish
+transaction-local tenant context before queries.
+end note
+
+@enduml

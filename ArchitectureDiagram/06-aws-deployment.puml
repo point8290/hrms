@@ -1,0 +1,74 @@
+@startuml HRMS_AWS_Deployment
+!include <C4/C4_Deployment.puml>
+title HRMS - AWS Deployment Diagram
+LAYOUT_WITH_LEGEND()
+
+Deployment_Node(aws, "AWS Cloud", "Production") {
+    Deployment_Node(edge, "Edge Layer", "AWS") {
+        Container(web, "React Application", "S3 + CloudFront")
+        Container(gateway, "API Gateway / ALB", "AWS")
+    }
+
+    Deployment_Node(compute, "Application Compute", "ECS / EKS") {
+        Deployment_Node(nodeCluster, "Node.js Runtime") {
+            Container(api, "HRMS API", "Node.js + TypeScript")
+            Container(worker, "Background Worker", "Node.js")
+        }
+        Deployment_Node(pythonCluster, "Python Runtime") {
+            Container(workforce, "Workforce Engine", "FastAPI + Python")
+            Container(payroll, "Payroll Engine", "FastAPI + Python")
+        }
+    }
+
+    Deployment_Node(messaging, "Messaging", "AWS") {
+        ContainerQueue(sqs, "SQS Queues", "Standard / FIFO where required")
+        Container(dlq, "Dead Letter Queues", "Failed messages")
+    }
+
+    Deployment_Node(data, "Data Layer", "AWS") {
+        ContainerDb(postgres, "PostgreSQL", "Amazon RDS / Aurora PostgreSQL")
+        ContainerDb(redis, "Redis", "ElastiCache")
+        ContainerDb(s3, "S3", "Private document bucket")
+    }
+
+    Deployment_Node(observability, "Observability", "AWS") {
+        Container(logs, "CloudWatch", "Logs, metrics and alarms")
+        Container(tracing, "OpenTelemetry", "Distributed tracing")
+    }
+
+    Deployment_Node(security, "Security", "AWS") {
+        Container(secrets, "Secrets Manager", "Application secrets")
+        Container(kms, "KMS", "Encryption keys")
+    }
+
+    Container(ses, "Amazon SES", "Email delivery")
+}
+
+Rel(web, gateway, "HTTPS")
+Rel(gateway, api, "HTTPS")
+Rel(api, postgres, "TLS / SQL")
+Rel(api, redis, "TLS")
+Rel(api, s3, "HTTPS")
+Rel(api, sqs, "HTTPS")
+Rel(sqs, worker, "Consume")
+Rel(sqs, workforce, "Consume")
+Rel(sqs, payroll, "Consume")
+Rel(sqs, dlq, "Failed messages")
+Rel(worker, postgres, "SQL")
+Rel(workforce, postgres, "SQL")
+Rel(payroll, postgres, "SQL")
+Rel(worker, s3, "Store generated documents")
+Rel(worker, ses, "Email")
+Rel(api, logs, "Logs")
+Rel(worker, logs, "Logs")
+Rel(workforce, logs, "Logs")
+Rel(payroll, logs, "Logs")
+Rel(api, tracing, "Trace")
+Rel(worker, tracing, "Trace")
+Rel(workforce, tracing, "Trace")
+Rel(payroll, tracing, "Trace")
+Rel(api, secrets, "Read secrets")
+Rel(api, kms, "Encryption")
+Rel(postgres, kms, "Encryption")
+Rel(s3, kms, "Encryption")
+@enduml

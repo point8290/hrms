@@ -1,0 +1,590 @@
+# SEMANTIC - hand-maintained module ownership and location.
+# Structural reality is regenerated into generated/codebase-index.yaml.
+# `npm run knowledge:check` reports drift between the two.
+#
+# status: implemented -> the path exists and is the real implementation
+# status: partial     -> exists, but a named capability below is not built yet
+# status: planned     -> architecture-only, no code
+
+meta:
+  type: semantic
+  schema_version: 2
+  implementation_state: mvp-spine-implemented
+  note: >-
+    The MVP journey from PRD s.30 runs end to end. Domains outside that spine
+    (recruitment, benefits, learning, expense, performance) are schema- and
+    architecture-level only; each is marked planned below.
+
+repository:
+  name: hrms
+  architecture: modular-monolith-plus-processing-services
+  runtimes: [node-typescript, python-fastapi, react-typescript]
+  datastore: postgresql-with-rls
+  broker: aws-sqs
+  local_broker: postgres-backed queue (integration.local_queue_message)
+
+layout:
+  apps/web: react ess/mss/admin console
+  apps/api: node transactional api, all domain modules
+  apps/worker: outbox publisher, queue consumer, notification dispatch, scheduler (WORKER_ROLES)
+  services/workforce-engine: fastapi attendance derivation
+  services/payroll-engine: fastapi payroll and statutory calculation
+  services/shared: hrms_engine runtime shared by both engines (db, queue, consumer loop)
+  packages/events: event envelope contract and queue routing
+  db/migrations: numbered sql migrations, forward-only
+  db/roles.sql: database roles; run once as superuser before migrating
+  db/grants.sql: privileges, re-applied by every migration run
+  scripts/demo: end-to-end MVP journey against a running stack
+  scripts/knowledge: knowledge layer generation and validation
+
+reference_artifacts:
+  prd: product requirements document (private, not in this repository)
+  c4: ArchitectureDiagram/
+  erd: ERD/
+
+entrypoints:
+  api: apps/api/src/server.ts
+  worker: apps/worker/src/main.ts
+  workforce_engine: services/workforce-engine/app/main.py
+  payroll_engine: services/payroll-engine/app/main.py
+  migrations: apps/api/src/infra/db/migrate.ts
+
+modules:
+
+  tenant:
+    type: domain
+    owner: node
+    status: implemented
+    path: apps/api/src/modules/tenant
+    responsibilities:
+      [tenant-config, company, branch, location, department, designation, holiday-calendar,
+       financial-year]
+    key_files:
+      financial_year: apps/api/src/modules/tenant/financial-year.ts
+    domains: [tenant]
+    dependencies: []
+    database_schemas: [identity, core, workforce]
+    api_base: /api/companies, /api/locations, /api/departments, /api/designations, /api/branches, /api/holiday-lists
+    tests: apps/api/test/integration
+
+  identity:
+    type: domain
+    owner: node
+    status: implemented
+    path: apps/api/src/modules/identity
+    responsibilities:
+      [tenant-provisioning, login, refresh-rotation, rbac, user-invite, system-roles,
+       password-reset, email-verification, login-throttling, totp-mfa, recovery-codes]
+    domains: [identity]
+    dependencies: [tenant]
+    database_schemas: [identity]
+    api_base: /api/tenants, /api/auth, /api/users, /api/roles
+    key_files:
+      auth_flows: apps/api/src/modules/identity/auth-flows.ts
+      mfa: apps/api/src/modules/identity/mfa.ts
+      mfa_routes: apps/api/src/modules/identity/mfa-routes.ts
+    notes: >-
+      Password hashing is scrypt from node:crypto (no native dependency). Refresh tokens
+      are stored hashed and rotate on use; reuse of a rotated token revokes every session
+      for that user.
+    tests: apps/api/test/integration
+
+  core-hr:
+    type: domain
+    owner: node
+    status: implemented
+    path: apps/api/src/modules/core-hr
+    responsibilities: [employee-master, employment-history, lifecycle-changes, separation, bank-account, tax-profile]
+    domains: [core_hr, employee_lifecycle]
+    dependencies: [tenant, identity]
+    database_schemas: [core]
+    api_base: /api/employees
+    notes: >-
+      employment_history is the authority for historical placement; core.employee is a
+      current-state projection. Bank account numbers are AES-256-GCM encrypted at the
+      application layer and only last4 is ever returned.
+    tests: apps/api/test/integration
+
+  workforce:
+    type: domain
+    owner: node
+    status: implemented
+    path: apps/api/src/modules/workforce
+    responsibilities: [shift-types, shift-assignment, checkin-intake, bulk-device-intake, attendance-read, corrections, recalculation-requests]
+    domains: [workforce, shift, attendance]
+    dependencies: [core-hr, leave, workflow]
+    database_schemas: [workforce]
+    calculation_delegated_to: workforce-engine
+    api_base: /api/shift-types, /api/shift-assignments, /api/attendance
+    key_files:
+      close_job: apps/api/src/modules/workforce/close-schedule.ts
+    notes: >-
+      close-schedule.ts contributes only what is attendance-specific - which dates a tenant
+      owes, and what to send when one comes due. Scheduling, claiming, retries, stale
+      recovery and abandonment live in infra/scheduler and are shared (ADR-011). The
+      workforce engine owns what happened during the day. Business-date arithmetic is done
+      in PostgreSQL against the tenant timezone, so it stays correct across DST and ignores
+      the server locale.
+    tests: apps/api/test/integration/attendance-close.test.ts
+
+  leave:
+    type: domain
+    owner: node
+    status: implemented
+    path: apps/api/src/modules/leave
+    responsibilities: [leave-types, allocation, application, approval-outcome, cancellation, ledger, balance, manual-adjustment]
+    domains: [leave]
+    dependencies: [core-hr, workflow]
+    database_schemas: [leave_mgmt]
+    api_base: /api/leave
+    pure_logic: apps/api/src/modules/leave/leave-math.ts
+    key_files:
+      period_jobs: apps/api/src/modules/leave/period-jobs.ts
+      scheduled_jobs: apps/api/src/modules/leave/leave-jobs.ts
+    notes: >-
+      Day counting, balance derivation, carry-forward and pro-rating are pure functions in
+      leave-math.ts with no database access, unit-tested independently of the service.
+    tests: apps/api/test/unit/leave-math.test.ts
+
+  compensation:
+    type: domain
+    owner: node
+    status: implemented
+    path: apps/api/src/modules/compensation
+    responsibilities: [salary-components, salary-structures, effective-dated-assignment, revisions, additional-salary]
+    domains: [compensation]
+    dependencies: [core-hr]
+    database_schemas: [compensation]
+    api_base: /api/compensation
+    tests: apps/api/test/integration
+
+  payroll:
+    type: domain
+    owner: node
+    status: implemented
+    path: apps/api/src/modules/payroll
+    responsibilities: [payroll-periods, run-orchestration, eligibility, input-snapshot, state-machine, review, approval, finalization, recalculation, payslip-read]
+    domains: [payroll, tax]
+    dependencies: [compensation, workforce, leave, core-hr, workflow, documents]
+    database_schemas: [payroll, compensation]
+    calculation_delegated_to: payroll-engine
+    api_base: /api/payroll-periods, /api/payroll-runs, /api/payslips
+    key_files:
+      snapshot: apps/api/src/modules/payroll/snapshot.ts
+      state_machine: apps/api/src/modules/payroll/service.ts
+      payment: apps/api/src/modules/payroll/payment.ts
+      tax_opening: apps/api/src/modules/payroll/tax-opening.ts
+    notes: >-
+      Legal state transitions are encoded as a table in service.ts; an illegal transition
+      is impossible to express. Snapshots are append-only and versioned per recalculation.
+    tests: apps/api/test/integration/mvp-journey.test.ts
+
+  workflow:
+    type: domain
+    owner: node
+    status: implemented
+    path: apps/api/src/modules/workflow
+    responsibilities: [versioned-definitions, sequential-instances, approval-tasks, approver-inbox, decisions]
+    domains: [workflow]
+    dependencies: [identity, core-hr]
+    database_schemas: [workflow]
+    api_base: /api/workflows, /api/approvals
+    not_implemented: [parallel-approval, delegation, sla-escalation-job]
+    notes: >-
+      Sequential approval only, on purpose. A running instance pins the definition version
+      it started with, so editing a workflow never changes a request in flight.
+    tests: apps/api/test/integration
+
+  documents:
+    type: domain
+    owner: node
+    status: implemented
+    path: apps/api/src/modules/documents
+    responsibilities: [presigned-upload, upload-confirmation, metadata, authorized-download-url]
+    domains: [documents, audit]
+    dependencies: [core-hr, identity]
+    database_schemas: [documents, audit]
+    external: [aws_s3]
+    api_base: /api/documents, /api/audit
+    notes: >-
+      The API never handles the binary. STORAGE_DRIVER=local serves signed objects from
+      /internal/files so development exercises the same authorization shape as S3.
+    tests: apps/api/test/integration
+
+  reporting:
+    type: domain
+    owner: node
+    status: implemented
+    path: apps/api/src/modules/reporting
+    responsibilities:
+      [report-catalogue, per-report-authorization, report-run-aggregate, async-request,
+       csv-export, presigned-download]
+    domains: [reporting]
+    dependencies: [core-hr, payroll, compensation, workforce, leave, expense, documents, audit]
+    database_schemas: [analytics, documents]
+    api_base: /api/reports
+    notes: >-
+      There is no reporting permission. Each report is gated on the permission that already
+      protects the data it reads, so the endpoint cannot become a route around payroll.read
+      (PRD s.7). Generation runs on the worker over the outbox/SQS path that already carries
+      payslip PDFs; attrition and hiring are deliberately absent (no defined formula, and
+      recruitment is P2).
+    tests: apps/api/test/integration/reporting.test.ts
+
+  web-shell:
+    type: interface
+    owner: node
+    status: implemented
+    path: apps/web/src
+    responsibilities: [product shell, role-aware navigation, design tokens, tenant branding, deep-link resolution]
+    domains: [identity, notification, workflow]
+    dependencies: [identity]
+    notes: >-
+      One application for every tenant. Branding arrives as data and is applied as CSS custom
+      properties, so there is no per-client build, component or stylesheet. Components consume
+      semantic tokens only - a token named after a customer would be a fork in disguise. The
+      brand colour is never used for text; lib/branding.ts derives a darkened variant that
+      clears 4.5 to 1, so a badly chosen colour cannot make the product unreadable.
+    tests: apps/web/test/branding.test.ts
+
+  notification-api:
+    type: domain
+    owner: node
+    status: implemented
+    path: apps/api/src/modules/notification
+    responsibilities: [in-app inbox, mark-read, preference read, preference update]
+    domains: [notification]
+    dependencies: [identity]
+    database_schemas: [notification]
+    api_base: /api/notifications, /api/notification-preferences
+    notes: >-
+      Ownership, not a permission: a notification is addressed to one person, so the only
+      question is whether the caller is that person. There is deliberately no
+      notification.admin - it would be a way to read other people's leave, expense and
+      payroll messages without holding any of those permissions. Email is never listed back.
+    tests: apps/api/test/integration/notification-api.test.ts
+    tests: apps/worker/test/notification-catalogue.test.ts
+
+  tenant-context:
+    type: infrastructure
+    owner: node
+    status: implemented
+    path: apps/api/src/infra/db/pool.ts
+    responsibilities: [withTenant, withPlatform, SET LOCAL app.tenant_id, RLS startup probe]
+    domains: [tenant, identity]
+    dependencies: []
+    database_schemas: []
+    invariant_refs: [multi-tenancy]
+    notes: >-
+      probeRlsEnforcement() runs before the server listens and refuses to boot if the
+      connection can bypass RLS (superuser, BYPASSRLS, or owning the tables).
+    tests: apps/api/test/integration/tenant-isolation.test.ts
+
+  event-publisher:
+    type: infrastructure
+    owner: node
+    status: implemented
+    path: apps/api/src/infra/events/outbox.ts
+    responsibilities: [outbox write, claim, publish marking, backoff, consumer idempotency claim]
+    domains: [integration]
+    dependencies: [tenant-context]
+    database_schemas: [integration]
+    external: [aws_sqs]
+    invariant_refs: [events]
+    tests: apps/api/test/integration
+
+  redis:
+    type: infrastructure
+    owner: node
+    status: implemented
+    path: apps/api/src/infra/redis.ts
+    responsibilities: [shared rate-limit state, short-lived coordination]
+    domains: [integration]
+    dependencies: []
+    database_schemas: []
+    external: [redis]
+    notes: >-
+      Cache and coordination only, never a source of truth. Returns null when Redis is
+      absent so rate limiting degrades to per-process rather than refusing traffic; the API
+      refuses to boot in production without REDIS_URL, because a per-process limit silently
+      multiplies by the instance count.
+    tests_note: >-
+      apps/api/test/integration/resilience.test.ts drives the API against a Redis that fails
+      every command, and asserts that requests still succeed while authentication and tenant
+      isolation still do not.
+
+  scheduler:
+    type: infrastructure
+    owner: node
+    status: implemented
+    path: apps/api/src/infra/scheduler
+    responsibilities:
+      [idempotent scheduling, claiming, attempt counting, capped backoff, stale recovery,
+       abandonment, job registry, per-tenant tick]
+    domains: [integration]
+    dependencies: [tenant-context, event-publisher, audit]
+    database_schemas: [integration]
+    key_files:
+      storage: apps/api/src/infra/scheduler/jobs.ts
+      tick: apps/api/src/infra/scheduler/registry.ts
+      registration: apps/api/src/infra/scheduler/index.ts
+    notes: >-
+      The machinery every periodic job inherits (ADR-011). A job type contributes a planner
+      and an executor; nothing else. Registration is explicit rather than an import side
+      effect, so a job cannot be scheduled only because something happened to import a file.
+      Claims use a CTE, not `WHERE id IN (SELECT ... FOR UPDATE SKIP LOCKED)`: with a locking
+      subquery the planner may claim past the limit, and a caller that handles only the first
+      strands the rest in `running`.
+    tests: apps/api/test/integration/scheduler.test.ts
+
+  telemetry:
+    type: infrastructure
+    owner: node
+    status: implemented
+    path: apps/api/src/infra/telemetry.ts
+    responsibilities:
+      [w3c trace context, span recording, attribute allow-list, optional otlp export]
+    domains: [integration]
+    dependencies: []
+    external: [opentelemetry]
+    database_schemas: []
+    notes: >-
+      Trace context propagates on the outbox row and the event envelope, so asynchronous
+      work belongs to the trace of the request that caused it (ADR-013). Span attributes are
+      restricted by an allow-list, not a deny-list: a trace is shipped to a third party and
+      retained for months, so a salary or an email in a span is a payroll leak. Error spans
+      carry the error type, never its message. The OpenTelemetry SDK is loaded lazily and
+      optionally; spans always reach stdout regardless.
+    tests: apps/api/test/unit/telemetry.test.ts
+
+  health:
+    type: infrastructure
+    owner: node
+    status: implemented
+    path: apps/api/src/http/health.ts
+    responsibilities: [liveness, readiness, dependency diagnostics]
+    domains: [integration]
+    dependencies: [tenant-context, redis]
+    database_schemas: []
+    notes: >-
+      Three endpoints because they answer three different questions. /health/live touches
+      nothing, so a database blip does not restart every task at once. /health/ready checks
+      only the database, because nothing else has no degraded path. /health/deps always
+      returns 200 so no load balancer acts on diagnostics. No response may contain a
+      connection string, host, bucket or credential.
+    tests: apps/api/test/integration/resilience.test.ts
+
+  audit:
+    type: infrastructure
+    owner: node
+    status: implemented
+    path: apps/api/src/infra/audit.ts
+    responsibilities: [append-only audit writes, sensitive-action catalog, secret redaction]
+    domains: [audit]
+    dependencies: [tenant-context]
+    database_schemas: [audit]
+    tests: apps/api/test/integration
+
+  api-worker:
+    type: service
+    owner: node
+    status: implemented
+    path: apps/worker/src
+    responsibilities: [outbox publisher, platform queue consumer, notification dispatch, payslip pdf generation]
+    domains: [notification, documents, integration]
+    dependencies: [event-publisher, documents]
+    database_schemas: [notification, documents, integration]
+    external: [aws_sqs, aws_ses, aws_s3]
+    responsibilities_note: >-
+      One binary, four selectable roles - publisher, consumer, notifications, scheduler -
+      chosen by WORKER_ROLES and all enabled by default (ADR-010). Splitting them across
+      deployments is configuration, not a code change: production runs the scheduler as its
+      own ECS service so a worker fleet saturated by a payroll run cannot stop a tenant's
+      attendance from closing. Every loop is safe to run in several instances at once.
+    key_files:
+      publisher: apps/worker/src/publisher.ts
+      consumer: apps/worker/src/consumer.ts
+      handlers: apps/worker/src/handlers.ts
+      notifications: apps/worker/src/notifications.ts
+      scheduler: apps/worker/src/scheduler.ts
+      payslip_pdf: apps/worker/src/payslip.ts
+    tests: apps/worker/test
+
+  workforce-engine:
+    type: service
+    owner: python
+    status: implemented
+    path: services/workforce-engine/app
+    responsibilities: [shift-resolution, checkin-normalisation, pairing, working-hours, late-early, overtime, leave-resolution, daily-close, attendance-write]
+    domains: [attendance, shift, workforce]
+    dependencies: [event-publisher]
+    database_schemas: [workforce, leave_mgmt, core, payroll]
+    external: [aws_sqs]
+    consumes: [CheckinRecorded, AttendanceCorrectionApproved]
+    produces: [AttendanceCalculated]
+    pure_logic: services/workforce-engine/app/attendance.py
+    components_ref: ArchitectureDiagram/04-workforce-components.puml
+    notes: >-
+      Absence is only ever decided by the daily close (`close_day`), never by an
+      event-driven recalculation. Days inside a finalized payroll period are skipped.
+    tests: services/workforce-engine/tests
+
+  payroll-engine:
+    type: service
+    owner: python
+    status: implemented
+    path: services/payroll-engine/app
+    responsibilities: [snapshot-loading, earnings, lop-proration, pf, esi, professional-tax, tds, net-pay, validation, slip-write]
+    domains: [payroll, tax]
+    dependencies: [event-publisher]
+    database_schemas: [payroll]
+    external: [aws_sqs]
+    consumes: [PayrollRunCreated]
+    produces: [PayrollCalculated]
+    pure_logic:
+      - services/payroll-engine/app/calculation.py
+      - services/payroll-engine/app/statutory.py
+    components_ref: ArchitectureDiagram/05-payroll-components.puml
+    notes: >-
+      Reads payroll_input_snapshot and nothing else. Decimal arithmetic throughout. One
+      employee's bad data fails that employee, never the whole run.
+    tests: services/payroll-engine/tests
+
+  engine-runtime:
+    type: shared
+    owner: python
+    status: implemented
+    path: services/shared/hrms_engine
+    responsibilities: [tenant_transaction, platform_transaction, claim_event, emit_event, queue adapters, consumer loop]
+    domains: [integration, tenant]
+    dependencies: []
+    database_schemas: [integration]
+    invariant_refs: [multi-tenancy, events]
+    tests: services/workforce-engine/tests
+
+  web:
+    type: ui
+    owner: react
+    status: partial
+    path: apps/web/src
+    responsibilities: [login, dashboard, self-service attendance, leave, payslips, approvals inbox, employee directory, payroll console, audit trail]
+    domains: [core_hr, attendance, leave, payroll, documents, workflow, audit]
+    dependencies: []
+    database_schemas: []
+    not_implemented: [org-configuration screens, compensation editing, recruitment, performance]
+    notes: >-
+      Navigation and actions are gated on the same permission codes the API enforces, so
+      the UI never offers an action the server would refuse.
+    tests: none (typecheck + build only)
+
+  events-contract:
+    type: shared
+    owner: node
+    status: implemented
+    path: packages/events/src
+    responsibilities: [event envelope schema, event type union, queue routing]
+    domains: [integration]
+    dependencies: []
+    database_schemas: []
+    tests: apps/api/test/integration
+
+  # ----------------------------------------------------- not yet implemented
+
+  onboarding:
+    type: domain
+    owner: node
+    status: implemented
+    path: apps/api/src/modules/onboarding
+    responsibilities:
+      [templates, template-matching, plan-instantiation, owner-resolution, task-completion,
+       document-gated tasks, plan settlement]
+    domains: [onboarding]
+    dependencies: [core-hr, documents, identity]
+    database_schemas: [recruitment]
+    api_base: /api/onboarding
+    notes: >-
+      Owners are resolved once, when the plan is created, and stored. Resolving lazily
+      would silently move a task when someone's manager changed, making "who was supposed
+      to do this" unanswerable. A task that requires a document cannot be completed without
+      one of the right type.
+    tests: apps/api/test/integration/onboarding-auth.test.ts
+
+  recruitment:
+    type: domain
+    owner: node
+    status: planned
+    path: apps/api/src/modules/recruitment
+    responsibilities: [requisitions, candidates, interviews, offers]
+    domains: [recruitment]
+    dependencies: [core-hr, workflow, documents]
+    database_schemas: [recruitment]
+    notes: The recruitment schema exists; onboarding is currently its only occupant.
+    tests: none
+
+  expense:
+    type: domain
+    owner: node
+    status: implemented
+    path: apps/api/src/modules/expense
+    responsibilities:
+      [expense-types, claims, lines, daily-limits, advances, advance-settlement,
+       manager-approval, finance-sanction, payment]
+    domains: [expense]
+    dependencies: [core-hr, workflow, documents]
+    database_schemas: [expense]
+    api_base: /api/expense-claims, /api/expense-advances, /api/expense-types
+    notes: >-
+      Finance may sanction less than was claimed, per line, and a reduction requires a
+      note - an employee is owed a reason for not being paid in full. Outstanding advances
+      settle against a claim at submission, so an employee holding company money is not
+      also reimbursed for it. A paid claim is immutable by database trigger.
+    tests: apps/api/test/integration/expense.test.ts
+
+  performance:
+    type: domain
+    owner: node
+    status: planned
+    path: apps/api/src/modules/performance
+    responsibilities: [cycles, goals, reviews, feedback]
+    domains: [performance]
+    dependencies: [core-hr, workflow]
+    database_schemas: [performance]
+    tests: none
+
+  benefits:
+    type: domain
+    owner: node
+    status: planned
+    path: apps/api/src/modules/benefits
+    responsibilities: [plans, eligibility, enrollment, contributions, claims]
+    domains: [benefits]
+    dependencies: [core-hr, compensation]
+    database_schemas: [compensation]
+    tests: none
+
+  learning:
+    type: domain
+    owner: node
+    status: planned
+    path: apps/api/src/modules/learning
+    responsibilities: [courses, assignment, completion, certification-expiry]
+    domains: [learning]
+    dependencies: [core-hr]
+    database_schemas: [learning]
+    tests: none
+
+  notification:
+    type: domain
+    owner: node
+    status: partial
+    path: apps/worker/src/handlers.ts
+    responsibilities: [templated email, dedupe, retry with failure tracking]
+    domains: [notification]
+    dependencies: [identity]
+    database_schemas: [notification]
+    external: [aws_ses]
+    not_implemented: [in-app channel, per-user preferences, notification API]
+    notes: >-
+      Lives in the worker rather than as an API module because nothing in the product
+      calls it synchronously; it is entirely event-driven.
+    tests: none

@@ -1,0 +1,43 @@
+@startuml HRMS_Sequence_Leave
+title HRMS - Leave Application Sequence
+
+actor Employee
+actor Manager
+participant "React Web" as UI
+participant "Node.js API" as API
+participant "Workflow Engine" as WF
+database PostgreSQL as DB
+queue "SQS" as SQS
+participant "Notification Worker" as Worker
+participant SES
+
+Employee -> UI: Apply for leave
+UI -> API: POST /leave-applications
+API -> DB: BEGIN + SET LOCAL app.tenant_id
+API -> DB: Validate policy / balance
+API -> DB: Create leave application
+API -> WF: Create approval workflow
+API -> DB: Insert outbox event
+DB --> API: Commit
+API --> UI: Application submitted
+
+Worker -> SQS: Consume LeaveApplied
+SQS --> Worker: Event
+Worker -> DB: Establish tenant context
+Worker -> SES: Notify manager
+
+Manager -> UI: Review leave
+UI -> API: Approve / Reject
+API -> DB: BEGIN + SET LOCAL app.tenant_id
+API -> WF: Complete approval task
+API -> DB: Update leave application
+API -> DB: If approved, create leave ledger entry
+API -> DB: Insert LeaveApproved/Rejected event
+DB --> API: Commit
+API --> UI: Decision saved
+
+Worker -> SQS: Consume decision event
+Worker -> DB: Mark notification state
+Worker -> SES: Notify employee
+
+@enduml

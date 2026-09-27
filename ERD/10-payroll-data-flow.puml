@@ -1,0 +1,42 @@
+@startuml HRMS_Payroll_Data_Flow
+title HRMS PostgreSQL - Payroll Data Flow
+
+rectangle "Payroll Admin" as Admin
+rectangle "Node.js Payroll Orchestrator" as Node
+database "Employee / HR" as HR
+database "Attendance" as Attendance
+database "Leave Ledger" as Leave
+database "Compensation" as Compensation
+database "Tax / Statutory Rules" as Rules
+database "Payroll Input Snapshot" as Snapshot
+rectangle "SQS" as SQS
+rectangle "FastAPI Payroll Engine" as Engine
+database "Payroll Results" as Results
+database "Salary Slip Snapshot" as Slip
+rectangle "S3" as S3
+rectangle "SES" as SES
+
+Admin --> Node : Start payroll
+Node --> HR : Load eligible employees
+Node --> Attendance : Load finalized attendance
+Node --> Leave : Load leave / LOP
+Node --> Compensation : Load effective salary
+Node --> Rules : Load effective rules
+Node --> Snapshot : Persist immutable inputs
+Node --> SQS : Publish PayrollRunCreated
+
+SQS --> Engine : Payroll calculation job
+Engine --> Snapshot : Read inputs
+Engine --> Engine : Calculate earnings
+Engine --> Engine : Calculate LOP
+Engine --> Engine : Calculate statutory deductions
+Engine --> Engine : Calculate tax
+Engine --> Engine : Calculate net pay
+Engine --> Results : Persist calculated results
+Engine --> Slip : Generate salary slip snapshot
+
+Node --> Slip : Review / finalize
+Slip --> S3 : Payslip PDF
+S3 --> SES : Document reference
+SES --> Admin : Email delivery
+@enduml

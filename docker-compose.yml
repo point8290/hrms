@@ -1,0 +1,88 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: hrms_owner
+      POSTGRES_PASSWORD: hrms_owner_dev
+      POSTGRES_DB: hrms
+    ports:
+      - "5433:5432"
+    volumes:
+      - hrms_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hrms_owner -d hrms"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    profiles: [app]
+    build: { context: ., dockerfile: apps/api/Dockerfile }
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://hrms_app:hrms_app_dev@postgres:5432/hrms
+      PLATFORM_DATABASE_URL: postgres://hrms_platform:hrms_platform_dev@postgres:5432/hrms
+      REDIS_URL: redis://redis:6379
+    ports: ["4000:4000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  worker:
+    profiles: [app]
+    build: { context: ., dockerfile: apps/worker/Dockerfile }
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://hrms_app:hrms_app_dev@postgres:5432/hrms
+      PLATFORM_DATABASE_URL: postgres://hrms_platform:hrms_platform_dev@postgres:5432/hrms
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  workforce-engine:
+    profiles: [app]
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+      args: { SERVICE: workforce-engine }
+    environment:
+      DATABASE_URL: postgres://hrms_app:hrms_app_dev@postgres:5432/hrms
+      PLATFORM_DATABASE_URL: postgres://hrms_platform:hrms_platform_dev@postgres:5432/hrms
+      QUEUE_DRIVER: local
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  payroll-engine:
+    profiles: [app]
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+      args: { SERVICE: payroll-engine }
+    environment:
+      DATABASE_URL: postgres://hrms_app:hrms_app_dev@postgres:5432/hrms
+      PLATFORM_DATABASE_URL: postgres://hrms_platform:hrms_platform_dev@postgres:5432/hrms
+      QUEUE_DRIVER: local
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  web:
+    profiles: [app]
+    build: { context: ., dockerfile: apps/web/Dockerfile }
+    ports: ["5173:80"]
+    depends_on: [api]
+
+volumes:
+  hrms_pgdata:
+
+# The application stack is not started by default: `docker compose up -d postgres redis`
+# is the normal development path, with the services run from source for fast iteration.
+# `docker compose --profile app up` builds and runs everything.

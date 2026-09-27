@@ -1,0 +1,62 @@
+@startuml HRMS_Sequence_Payroll
+title HRMS - Payroll Processing Sequence
+
+actor "Payroll Admin" as PA
+participant "React Web" as UI
+participant "Node.js API" as API
+database PostgreSQL as DB
+queue "SQS" as SQS
+participant "FastAPI Payroll Engine" as PE
+participant "Payroll Worker" as PW
+participant S3
+participant SES
+
+PA -> UI: Start payroll
+UI -> API: POST /payroll-runs
+API -> DB: BEGIN + SET LOCAL app.tenant_id
+API -> DB: Create PayrollRun = DRAFT
+API -> DB: Validate eligible employees
+API -> DB: Create payroll input snapshots
+API -> DB: Insert PayrollRunCreated outbox event
+DB --> API: Commit
+API --> UI: Payroll run created
+
+PW -> SQS: Consume PayrollRunCreated
+SQS --> PW: Event {tenant_id,event_id,payroll_run_id}
+PW -> DB: Establish tenant context
+PW -> DB: Check processed_event
+PW -> DB: Set PayrollRun = CALCULATING
+PW -> PE: Submit calculation job
+
+PE -> DB: Load payroll snapshots
+PE -> PE: Calculate earnings
+PE -> PE: Calculate LOP
+PE -> PE: Calculate statutory deductions
+PE -> PE: Calculate tax
+PE -> PE: Calculate net pay
+PE -> DB: Persist calculation results
+PE -> DB: Mark event processed
+PE -> SQS: Publish PayrollCalculated
+
+API -> DB: Set PayrollRun = UNDER_REVIEW
+PA -> UI: Review payroll
+PA -> UI: Approve payroll
+UI -> API: POST /payroll-runs/{id}/finalize
+API -> DB: BEGIN + SET LOCAL app.tenant_id
+API -> DB: Validate payroll
+API -> DB: Set FINALIZED
+API -> DB: Insert PayrollFinalized outbox event
+DB --> API: Commit
+
+PW -> SQS: Consume PayrollFinalized
+PW -> S3: Generate/store payslip PDFs
+PW -> SES: Email payslip notification
+PW -> DB: Store document metadata
+PW -> DB: Mark notification complete
+
+note over PE,DB
+Finalized salary slips are immutable snapshots.
+Corrections use adjustments, reversals or supplementary payroll.
+end note
+
+@enduml

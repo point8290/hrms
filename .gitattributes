@@ -1,0 +1,5 @@
+# Line endings are normalised to LF. Migration checksums depend on exact bytes, so a
+# CRLF conversion would make an applied migration look edited.
+* text=auto eol=lf
+*.png binary
+*.pdf binary

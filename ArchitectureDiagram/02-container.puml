@@ -1,0 +1,58 @@
+@startuml HRMS_Container
+!include <C4/C4_Container.puml>
+title HRMS - C4 Container Diagram
+LAYOUT_WITH_LEGEND()
+
+Person(employee, "Employee")
+Person(manager, "Manager")
+Person(hr, "HR Administrator")
+Person(payrollAdmin, "Payroll Administrator")
+Person(finance, "Finance Administrator")
+Person(tenantAdmin, "Tenant Administrator")
+
+System_Ext(identity, "Identity Provider", "SSO / OAuth / SAML")
+
+System_Boundary(hrms, "Multi-Tenant SaaS HRMS") {
+    Container(web, "Web Application", "React + TypeScript", "Employee, manager, HR and admin web portal.")
+    Container(api, "HRMS API", "Node.js + TypeScript", "REST APIs, authentication, authorization, business workflows and transactional operations.")
+    Container(worker, "Background Worker", "Node.js + TypeScript", "Consumes asynchronous events and executes notifications, document jobs and orchestration tasks.")
+    Container(workforce, "Workforce Calculation Engine", "FastAPI + Python", "Processes attendance, shifts, working hours and overtime.")
+    Container(payroll, "Payroll Calculation Engine", "FastAPI + Python", "Calculates salary, deductions, tax, statutory contributions and net pay.")
+    ContainerDb(db, "HRMS Database", "PostgreSQL", "Transactional source of truth protected with PostgreSQL RLS.")
+    ContainerQueue(sqs, "Event Queue", "AWS SQS", "Asynchronous domain events and background processing.")
+    ContainerDb(redis, "Cache", "Redis", "Caching, short-lived locks, rate limiting and temporary state.")
+    ContainerDb(s3, "Document Storage", "AWS S3", "Employee documents, receipts, payslips and reports.")
+    Container(email, "Notification Service", "Node.js", "Notification orchestration, templates and delivery management.")
+    Container_Ext(awsSes, "Amazon SES", "AWS", "Transactional email delivery.")
+    Container_Ext(biometric, "Biometric System", "External", "Attendance device / biometric integration.")
+    Container_Ext(bank, "Bank / Payment System", "External", "Salary payment processing.")
+    Container_Ext(accounting, "Accounting / ERP", "External", "Accounting integration.")
+    Container_Ext(calendar, "Calendar", "External", "Interview and HR calendar integration.")
+}
+
+Rel(employee, web, "Uses")
+Rel(manager, web, "Uses")
+Rel(hr, web, "Uses")
+Rel(payrollAdmin, web, "Uses")
+Rel(finance, web, "Uses")
+Rel(tenantAdmin, web, "Uses")
+Rel(web, api, "HTTPS / REST")
+Rel(api, identity, "Authenticates / validates identity")
+Rel(api, db, "Reads / writes transactional data")
+Rel(api, redis, "Reads / writes cache")
+Rel(api, s3, "Creates signed upload/download URLs")
+Rel(api, sqs, "Publishes domain events")
+Rel(sqs, worker, "Consumes events")
+Rel(sqs, workforce, "Sends workforce jobs")
+Rel(sqs, payroll, "Sends payroll jobs")
+Rel(worker, db, "Reads / writes")
+Rel(worker, s3, "Stores generated files")
+Rel(worker, email, "Triggers notifications")
+Rel(workforce, db, "Reads source data / writes calculated results")
+Rel(payroll, db, "Reads payroll inputs / writes calculation results")
+Rel(email, awsSes, "Sends email")
+Rel(biometric, api, "Attendance events")
+Rel(api, bank, "Payment instructions / exports")
+Rel(api, accounting, "Accounting data")
+Rel(api, calendar, "Calendar integration")
+@enduml

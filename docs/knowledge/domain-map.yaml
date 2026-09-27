@@ -1,0 +1,271 @@
+# SEMANTIC - hand-maintained. Change only when business meaning changes.
+# Source: product requirements (s.5-23), ERD/, ArchitectureDiagram/
+# Purpose: business boundaries. For code location see codebase-map.yaml.
+
+meta:
+  type: semantic
+  schema_version: 1
+  domain_count: 23
+  implementation_note: >-
+    Domains marked implemented in codebase-map.yaml are the MVP spine. The rest are
+    schema- or architecture-level only.
+
+domains:
+
+  tenant:
+    purpose: customer organization, org hierarchy and tenant configuration
+    priority: mvp
+    owns: [tenant, company, branch, location, department, designation]
+    depends_on: []
+    critical_concepts:
+      - tenant is the isolation root
+      - hierarchy tenant>legal_entity>business_unit>department>team>employee
+      - tenant config = timezone, locale, currency, country, financial_year
+
+  identity:
+    purpose: authentication, authorization and tenant membership
+    priority: mvp
+    owns:
+      [app_user, tenant_membership, role, permission, role_permission, membership_role,
+       refresh_token, auth_token, user_mfa, mfa_recovery_code]
+    depends_on: [tenant]
+    critical_concepts:
+      - jwt access + refresh with rotation and reuse detection
+      - totp second factor, required of anyone holding a sensitive permission (ADR-012)
+      - rbac with custom tenant roles
+      - user is global, membership is tenant-scoped; the authenticator is global too
+      - sensitive fields (salary, bank, tax) need extra permission
+
+  core_hr:
+    purpose: employee master, organizational placement and employment history
+    priority: mvp
+    owns: [employee, employment_history, bank_account, tax_profile, emergency_contact]
+    depends_on: [tenant, identity]
+    critical_concepts:
+      - employee_code unique per tenant
+      - effective-dated employment records
+      - employee optionally linked to app_user
+
+  employee_lifecycle:
+    purpose: onboarding, confirmation, promotion, transfer, separation
+    priority: mvp
+    owns: []
+    writes_to: [employment_history, manager_assignment]
+    depends_on: [core_hr, workflow, notification, documents]
+    critical_concepts:
+      - recruitment>offer>onboarding>active>probation>promotion/transfer>notice>separation
+      - transitions are effective-dated and auditable
+      - no dedicated ERD tables; state lives in employment_history
+
+  recruitment:
+    purpose: requisitions, candidates, interviews and offers
+    priority: p2
+    owns: [job_requisition, candidate, application, interview, offer]
+    depends_on: [core_hr, workflow, documents]
+    critical_concepts:
+      - offer acceptance converts candidate to employee
+    modeled_in_erd: false
+
+  onboarding:
+    purpose: post-offer task orchestration for new joiners
+    priority: mvp
+    owns: [onboarding_template, onboarding_template_task, onboarding_plan, onboarding_task]
+    depends_on: [core_hr, workflow, documents, notification]
+    critical_concepts:
+      - configurable tasks with owner, due date, mandatory flag
+
+  workforce:
+    purpose: parent context for shift, attendance and time tracking
+    priority: mvp
+    owns: [holiday_list, holiday]
+    depends_on: [core_hr]
+    critical_concepts:
+      - node owns intake and requests, python owns calculation
+      - holiday calendar is shared by attendance, leave and payroll
+
+  shift:
+    purpose: shift definitions and effective-dated employee assignment
+    priority: mvp
+    owns: [shift_type, shift_assignment]
+    depends_on: [core_hr, workforce]
+    critical_concepts:
+      - fixed / flexible / rotational / overnight
+      - crosses_midnight, grace in/out, overtime enablement
+      - assignment is effective-dated and must not overlap
+
+  attendance:
+    purpose: raw check-in capture and derived attendance
+    priority: mvp
+    owns: [employee_checkin, attendance, attendance_correction]
+    depends_on: [core_hr, shift, leave, workforce]
+    critical_concepts:
+      - check-in is an immutable observed fact
+      - attendance is derived state and recalculable
+      - corrections are request+approval, never overwrite raw events
+      - tolerate duplicate, out-of-order, missing-OUT, offline device, timezone
+
+  leave:
+    purpose: leave policy, allocation, application and balance
+    priority: mvp
+    owns:
+      - leave_type
+      - leave_policy
+      - leave_policy_rule
+      - leave_policy_assignment
+      - leave_allocation
+      - leave_application
+      - leave_ledger_entry
+      - leave_encashment
+      - leave_period_job
+    depends_on: [core_hr, workforce, workflow]
+    critical_concepts:
+      - ledger-based balance; balance is derived, never a stored mutable field
+      - accrual, carry-forward, expiry, encashment, half-day, comp-off, LOP
+      - approval chain configurable by duration, scope or policy
+
+  expense:
+    purpose: employee claims, advances and reimbursement
+    priority: mvp
+    owns: [expense_type, expense_claim, expense_line, employee_advance]
+    depends_on: [core_hr, workflow, documents]
+    critical_concepts:
+      - claim > lines > receipt documents
+      - manager review then finance review
+      - advances settle against claims
+
+  compensation:
+    purpose: salary components, structures and effective-dated assignment
+    priority: mvp
+    owns:
+      - salary_component
+      - salary_structure
+      - salary_structure_component
+      - salary_assignment
+      - compensation_revision
+      - additional_salary
+    depends_on: [core_hr]
+    critical_concepts:
+      - effective-dated so historical payroll stays stable
+      - structure is versioned; component is formula, fixed or percentage
+      - arrears and one-off pay via additional_salary
+
+  payroll:
+    purpose: payroll runs, calculation, payslips, finalization and payment
+    priority: mvp
+    owns:
+      - payroll_period
+      - payroll_run
+      - payroll_employee
+      - payroll_input_snapshot
+      - salary_slip
+      - salary_slip_component
+      - payment_batch
+      - payment_line
+    depends_on: [compensation, attendance, leave, tax, core_hr, workflow, documents]
+    critical_concepts:
+      - snapshot-based input, deterministic versioned calculation
+      - states DRAFT>VALIDATING>CALCULATING>CALCULATED>UNDER_REVIEW>APPROVED>FINALIZED>PAYMENT_PENDING>PAID, plus FAILED>RETRY
+      - finalized slip is an immutable snapshot
+      - corrections via adjustment, reversal or supplementary run
+
+  tax:
+    purpose: India-first statutory and income tax configuration
+    priority: mvp
+    owns: [statutory_rule, tax_declaration, employee_tax_opening]
+    reads: [tax_profile]
+    depends_on: [compensation, core_hr]
+    critical_concepts:
+      - TDS, PF, ESI, PT, gratuity, bonus
+      - rules are effective-dated and versioned, never hard-coded
+      - the year is estimated from opening + actual + projected, never gross x 12 (ADR-014)
+      - previous-employer income and TDS are tax-year facts, frozen into every snapshot
+      - a required rule that cannot be resolved fails the employee; zero is never assumed
+      - rule change must not rewrite historical payroll
+
+  benefits:
+    purpose: benefit plans, enrollment, contributions and claims
+    priority: p2
+    owns: [benefit_plan, benefit_enrollment]
+    depends_on: [core_hr, payroll]
+    modeled_in_erd: false
+
+  performance:
+    purpose: goals, review cycles, ratings and calibration
+    priority: p2
+    owns: [performance_cycle, goal, performance_review, feedback]
+    depends_on: [core_hr, workflow]
+
+  learning:
+    purpose: courses, assignments, completion and certification
+    priority: p2
+    owns: [course, enrollment]
+    depends_on: [core_hr]
+    modeled_in_erd: false
+
+  documents:
+    purpose: employee document metadata and controlled S3 access
+    priority: mvp
+    owns: [document]
+    depends_on: [core_hr, identity]
+    critical_concepts:
+      - binaries in private S3, metadata in postgres
+      - presigned url for upload/download, never public
+      - versioned with checksum and retention metadata
+
+  workflow:
+    purpose: reusable configurable approval engine
+    priority: mvp
+    owns: [workflow_definition, workflow_instance, approval_task, workflow_delegation]
+    depends_on: [identity, core_hr]
+    critical_concepts:
+      - polymorphic entity_type + entity_id
+      - parallel groups complete by all (default), any or quorum; policy frozen on the task
+      - maker-checker means neither the requester nor the subject may approve (delegation included)
+      - delegation and escalation widen who may act, never what may happen
+      - a rejected request is superseded by a new attempt, never reopened
+      - versioned definitions; running instances keep their version and their due dates
+
+  notification:
+    purpose: templated email and in-app delivery of business events
+    priority: mvp
+    owns: [notification, notification_preference]
+    depends_on: [identity, core_hr]
+    critical_concepts:
+      - catalogue classification comes from the PRD (s.18.4 mandatory, s.18.5 controllable)
+      - a preference never suppresses a mandatory notification
+      - an approver pending-approval notice is mandatory under s.18.4 but the requester outcome notice on the same category stays controllable
+      - absence of a preference means send; only an explicit opt-out silences anything
+      - one row per channel; dedupe identity is event + recipient + channel + type (s.18.6)
+      - in-app is sent on creation and read via read_at; email goes through the dispatcher
+      - no amounts in subjects or payloads (s.18.8)
+  reporting:
+    purpose: core HR, attendance, leave, payroll and expense reports with async export
+    priority: mvp
+    owns: [report_run]
+    depends_on: [core_hr, workforce, leave, compensation, payroll, expense, documents, audit]
+    critical_concepts:
+      - a report is gated on the permission protecting the data it reads, never a report role
+      - payroll cost reads finalized slips only; a draft is not a cost
+      - headcount reads effective-dated employment_history, so history stays true
+      - attrition and hiring are absent by design (no defined formula, recruitment is p2)
+
+  audit:
+    purpose: append-only trail of sensitive business actions
+    priority: mvp
+    owns: [audit_log]
+    depends_on: [identity]
+    critical_concepts:
+      - append-only, never updated or deleted
+      - captures actor, time, entity, before/after, correlation_id
+      - mandatory for salary, bank, attendance correction, leave adjustment, payroll finalization, separation
+
+  integration:
+    purpose: event infrastructure, scheduling and external system boundaries
+    priority: mvp
+    owns: [event_outbox, processed_event, scheduled_job, local_queue_message]
+    depends_on: []
+    critical_concepts:
+      - outbox pattern makes business write and event intent atomic
+      - processed_event gives consumers idempotency
+      - scheduled_job is the one ledger for periodic work keyed by tenant and date (ADR-011)
+      - external edges - biometric, bank, accounting/erp, calendar, sso

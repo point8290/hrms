@@ -1,0 +1,126 @@
+# SEMANTIC - domain dependency graph and blast radius.
+# Read this to answer "what else breaks if I change X".
+# Direction: `depends_on` = this domain reads/needs the target.
+#            `impacts`    = reverse edge, precomputed for impact analysis.
+# Trivial library imports are deliberately not recorded.
+
+meta:
+  type: semantic
+  schema_version: 1
+  cycles: none
+  rule: a domain may depend on another domain's API/events, never on its tables
+
+layers:
+  0_platform: [tenant, identity, integration, audit]
+  1_foundation: [core_hr, workflow, documents, notification]
+  2_operational: [employee_lifecycle, recruitment, onboarding, workforce, shift, attendance, leave, expense, performance, learning]
+  3_financial: [compensation, tax, benefits, payroll]
+
+domains:
+
+  tenant:
+    depends_on: {domains: [], infrastructure: [postgresql]}
+    impacts: [identity, core_hr, everything]
+
+  identity:
+    depends_on: {domains: [tenant], infrastructure: [postgresql, redis]}
+    note: redis backs distributed rate limiting on the auth endpoints, not identity state
+    impacts: [core_hr, workflow, documents, notification, audit]
+
+  core_hr:
+    depends_on: {domains: [tenant, identity], infrastructure: [postgresql]}
+    impacts: [employee_lifecycle, recruitment, onboarding, workforce, shift, attendance, leave, expense, compensation, tax, payroll, performance, documents, workflow, benefits, learning, reporting]
+
+  employee_lifecycle:
+    depends_on: {domains: [core_hr, workflow, notification, documents], infrastructure: [postgresql, sqs]}
+    impacts: [compensation, payroll, attendance, leave]
+
+  recruitment:
+    depends_on: {domains: [core_hr, workflow, documents], infrastructure: [postgresql, s3]}
+    impacts: [onboarding]
+
+  onboarding:
+    depends_on: {domains: [recruitment, core_hr, workflow, documents, notification], infrastructure: [postgresql, sqs, ses]}
+    impacts: [employee_lifecycle]
+
+  workforce:
+    depends_on: {domains: [core_hr], infrastructure: [postgresql]}
+    impacts: [shift, attendance, leave, payroll, reporting]
+
+  shift:
+    depends_on: {domains: [core_hr, workforce], infrastructure: [postgresql]}
+    impacts: [attendance]
+
+  attendance:
+    depends_on: {domains: [core_hr, shift, leave, workforce], infrastructure: [postgresql, sqs]}
+    impacts: [payroll, notification]
+    note: >-
+      Payroll depends on attendance having been *closed*, not merely recorded. A period with
+      unclosed days is refused unless explicitly overridden (ADR-007), so a scheduler outage
+      surfaces as a blocked payroll run rather than as quietly under-reported LOP.
+
+  leave:
+    depends_on: {domains: [core_hr, workforce, workflow], infrastructure: [postgresql, sqs]}
+    impacts: [attendance, payroll, notification, reporting]
+
+  expense:
+    depends_on: {domains: [core_hr, workflow, documents], infrastructure: [postgresql, s3, sqs]}
+    impacts: [notification, reporting]
+
+  compensation:
+    depends_on: {domains: [core_hr], infrastructure: [postgresql]}
+    impacts: [payroll, tax, benefits, reporting]
+
+  tax:
+    depends_on: {domains: [compensation, core_hr], infrastructure: [postgresql]}
+    impacts: [payroll]
+
+  benefits:
+    depends_on: {domains: [core_hr, compensation], infrastructure: [postgresql]}
+    impacts: [payroll]
+
+  payroll:
+    depends_on:
+      domains: [compensation, workforce, attendance, leave, tax, benefits, core_hr, workflow, documents]
+      infrastructure: [postgresql, sqs, s3, ses]
+    impacts: [notification, documents, audit, reporting]
+
+  performance:
+    depends_on: {domains: [core_hr, workflow], infrastructure: [postgresql]}
+    impacts: []
+
+  learning:
+    depends_on: {domains: [core_hr], infrastructure: [postgresql]}
+    impacts: []
+
+  documents:
+    depends_on: {domains: [core_hr, identity], infrastructure: [postgresql, s3]}
+    impacts: [expense, payroll, recruitment, onboarding, employee_lifecycle, reporting]
+
+  workflow:
+    depends_on: {domains: [identity, core_hr], infrastructure: [postgresql]}
+    impacts: [leave, expense, payroll, employee_lifecycle, performance, attendance, recruitment, onboarding]
+
+  notification:
+    depends_on: {domains: [identity, integration], infrastructure: [postgresql, sqs, ses]}
+    impacts: [employee_lifecycle, onboarding]
+
+  audit:
+    depends_on: {domains: [identity], infrastructure: [postgresql]}
+    impacts: [reporting]
+
+  reporting:
+    depends_on:
+      {domains: [core_hr, workforce, leave, compensation, payroll, expense, documents, audit],
+       infrastructure: [postgresql, sqs, s3]}
+    impacts: []
+
+  integration:
+    depends_on: {domains: [], infrastructure: [postgresql, sqs]}
+    impacts: [notification, attendance, payroll, leave, employee_lifecycle]
+
+high_blast_radius:
+  core_hr: touched by every operational and financial domain
+  workflow: any approval change affects leave, expense, payroll, lifecycle
+  integration: outbox/idempotency change affects every async consumer
+  tenant: isolation change affects the whole system

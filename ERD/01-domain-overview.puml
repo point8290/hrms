@@ -1,0 +1,140 @@
+@startuml HRMS_Domain_Overview
+hide circle
+skinparam linetype ortho
+title HRMS PostgreSQL - Domain Overview
+
+entity "tenant" as tenant {
+  *id : uuid
+  --
+  name : varchar
+  slug : varchar
+  timezone : varchar
+  currency : varchar
+  country_code : varchar
+  status : varchar
+}
+
+entity "user" as user {
+  *id : uuid
+  --
+  email : varchar
+  status : varchar
+}
+
+entity "employee" as employee {
+  *id : uuid
+  --
+  tenant_id : uuid
+  employee_code : varchar
+  status : varchar
+  joining_date : date
+}
+
+entity "employment_history" as employment {
+  *id : uuid
+  --
+  tenant_id : uuid
+  employee_id : uuid
+  effective_from : date
+  effective_to : date?
+}
+
+entity "shift_assignment" as shift {
+  *id : uuid
+  --
+  tenant_id : uuid
+  employee_id : uuid
+  shift_type_id : uuid
+  effective_from : date
+  effective_to : date?
+}
+
+entity "employee_checkin" as checkin {
+  *id : uuid
+  --
+  tenant_id : uuid
+  employee_id : uuid
+  checkin_at : timestamptz
+  direction : varchar
+}
+
+entity "attendance" as attendance {
+  *id : uuid
+  --
+  tenant_id : uuid
+  employee_id : uuid
+  attendance_date : date
+  status : varchar
+  working_minutes : integer
+}
+
+entity "leave_application" as leaveapp {
+  *id : uuid
+  --
+  tenant_id : uuid
+  employee_id : uuid
+  leave_type_id : uuid
+  start_date : date
+  end_date : date
+  status : varchar
+}
+
+entity "leave_ledger_entry" as ledger {
+  *id : uuid
+  --
+  tenant_id : uuid
+  employee_id : uuid
+  leave_type_id : uuid
+  quantity : numeric
+  entry_type : varchar
+}
+
+entity "salary_assignment" as salary {
+  *id : uuid
+  --
+  tenant_id : uuid
+  employee_id : uuid
+  salary_structure_id : uuid
+  effective_from : date
+}
+
+entity "payroll_run" as payroll {
+  *id : uuid
+  --
+  tenant_id : uuid
+  period_start : date
+  period_end : date
+  status : varchar
+}
+
+entity "salary_slip" as slip {
+  *id : uuid
+  --
+  tenant_id : uuid
+  payroll_run_id : uuid
+  employee_id : uuid
+  gross_amount : numeric
+  net_amount : numeric
+  calculation_version : varchar
+}
+
+tenant ||--o{ employee
+tenant ||--o{ user
+employee ||--o{ employment
+employee ||--o{ shift
+employee ||--o{ checkin
+employee ||--o{ attendance
+employee ||--o{ leaveapp
+employee ||--o{ ledger
+employee ||--o{ salary
+tenant ||--o{ payroll
+payroll ||--o{ slip
+employee ||--o{ slip
+
+checkin ..> attendance : derives
+leaveapp ..> ledger : creates
+attendance ..> payroll : input
+ledger ..> payroll : LOP input
+salary ..> payroll : compensation input
+
+@enduml

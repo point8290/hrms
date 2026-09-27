@@ -1,0 +1,258 @@
+name: CI
+
+# Every job here is a gate, not a report. A red pipeline means the change does not merge:
+# the failures this catches — a tenant table without RLS, a migration that changed after it
+# was applied, a knowledge map that no longer describes the code — are all silent in
+# production and expensive to find there.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  NODE_VERSION: '22'
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  static:
+    name: Typecheck and knowledge drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+
+      # Typecheck is the lint: the project has no separate linter, and `tsc --noEmit` across
+      # four workspaces catches the class of mistake a linter would.
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Bidirectional: the maps must describe code that exists, and the code must not contain
+      # anything the maps do not describe. A knowledge layer that drifts is worse than none,
+      # because it will be believed.
+      - name: Knowledge layer drift
+        run: npm run knowledge:check
+
+      - name: Knowledge layer regenerates cleanly
+        run: |
+          npm run knowledge:generate
+          if ! git diff --quiet -- docs/knowledge/generated; then
+            echo "::error::Generated knowledge is stale. Run 'npm run knowledge:update' and commit the result."
+            git --no-pager diff -- docs/knowledge/generated
+            exit 1
+          fi
+
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      # No database, no Redis, no network. These must stay runnable on a laptop offline.
+      - name: API unit tests
+        run: npm run test --workspace @hrms/api
+
+  migrations:
+    name: Migration validation
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: hrms
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+        ports: ['5432:5432']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+
+      - name: Create roles
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -U postgres -d hrms -v ON_ERROR_STOP=1 -f db/roles.sql
+
+      # Applied to a database that has never seen them, which is the only way to find a
+      # migration that depends on state a previous developer created by hand.
+      - name: Apply migrations to a fresh database
+        env:
+          MIGRATION_DATABASE_URL: postgres://hrms_owner:hrms_owner_dev@localhost:5432/hrms
+        run: node --experimental-strip-types apps/api/src/infra/db/migrate.ts
+
+      - name: Grants
+        env:
+          PGPASSWORD: hrms_owner_dev
+        run: psql -h localhost -U hrms_owner -d hrms -v ON_ERROR_STOP=1 -f db/grants.sql
+
+      # A redeploy runs migrations again. The second run must change nothing and must not
+      # fail — and the checksum guard must notice if an applied file was edited afterwards.
+      - name: Re-applying migrations is a no-op
+        env:
+          MIGRATION_DATABASE_URL: postgres://hrms_owner:hrms_owner_dev@localhost:5432/hrms
+        run: |
+          output=$(node --experimental-strip-types apps/api/src/infra/db/migrate.ts)
+          echo "$output"
+          if ! echo "$output" | grep -q "Applied 0 migration"; then
+            echo "::error::Re-running migrations was not a no-op."
+            exit 1
+          fi
+
+      - name: Schema invariants
+        env:
+          MIGRATION_DATABASE_URL: postgres://hrms_owner:hrms_owner_dev@localhost:5432/hrms
+        run: node scripts/db/validate-migrations.mjs
+
+  integration:
+    name: Integration and isolation tests
+    runs-on: ubuntu-latest
+    needs: [static]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: hrms
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+        ports: ['5432:5432']
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+        ports: ['6379:6379']
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgres://hrms_app:hrms_app_dev@localhost:5432/hrms
+      PLATFORM_DATABASE_URL: postgres://hrms_platform:hrms_platform_dev@localhost:5432/hrms
+      MIGRATION_DATABASE_URL: postgres://hrms_owner:hrms_owner_dev@localhost:5432/hrms
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: ci-only-secret-that-is-long-enough-to-pass-validation
+      FIELD_ENCRYPTION_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+      QUEUE_DRIVER: local
+      STORAGE_DRIVER: local
+      MAILER_DRIVER: console
+      LOG_LEVEL: error
+      TELEMETRY_LOG_SPANS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+
+      - name: Create roles
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -U postgres -d hrms -v ON_ERROR_STOP=1 -f db/roles.sql
+      - name: Migrate
+        run: node --experimental-strip-types apps/api/src/infra/db/migrate.ts
+      - name: Grants
+        env:
+          PGPASSWORD: hrms_owner_dev
+        run: psql -h localhost -U hrms_owner -d hrms -v ON_ERROR_STOP=1 -f db/grants.sql
+
+      # Run first and separately, so a cross-tenant leak is never buried in a long log.
+      # This is the one failure that must never reach an environment holding real payroll.
+      - name: Tenant isolation
+        run: |
+          node --experimental-strip-types --test \
+            apps/api/test/integration/tenant-isolation.test.ts \
+            apps/api/test/integration/tenant-context.test.ts
+
+      - name: API integration tests
+        run: npm run test:integration --workspace @hrms/api
+
+      - name: Worker tests
+        # 4,000 payslips is the real scale test; a smaller number in CI keeps the job under
+        # ten minutes while still exercising every failure branch.
+        env:
+          SCALE_EMPLOYEES: '400'
+        run: npm run test --workspace @hrms/worker
+
+      # The queue's terminal state is one SQL predicate, so it can only be proved against a
+      # real Postgres — and the calculation-engine job below deliberately has none. Without
+      # this step those eight tests skip everywhere and the invariant they protect (an
+      # exhausted message never returns to the ordinary receive path) is unguarded in CI.
+      # Only psycopg is installed: this needs the queue driver, not the engines.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Queue dead-letter tests
+        working-directory: services/payroll-engine
+        run: |
+          pip install 'psycopg[binary,pool]==3.2.3'
+          PYTHONPATH="..:." python -m unittest tests.test_queue_dead_letter
+
+  python:
+    name: Calculation engine tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r services/workforce-engine/requirements.txt
+      # Pure calculation: Decimal arithmetic, statutory rules, attendance derivation. No
+      # database, because the figures are what matter and they must be provable in isolation.
+      # `-t tests` because the test directories have no __init__.py: they are a flat set of
+      # unittest modules, not a package, and the top-level directory has to match.
+      - name: Workforce engine
+        working-directory: services/workforce-engine
+        run: PYTHONPATH="..:." python -m unittest discover -s tests -t tests
+      - name: Payroll engine
+        working-directory: services/payroll-engine
+        run: PYTHONPATH="..:." python -m unittest discover -s tests -t tests
+
+  build:
+    name: Build images
+    runs-on: ubuntu-latest
+    needs: [static, unit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      # Built, not pushed. Pushing is the deploy pipeline's job and needs credentials this
+      # workflow deliberately does not have.
+      - name: API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/worker/Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

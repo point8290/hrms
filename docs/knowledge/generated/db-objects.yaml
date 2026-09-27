@@ -1,0 +1,402 @@
+# GENERATED FILE - DO NOT EDIT.
+# Produced by scripts/knowledge/generate.mjs (npm run knowledge:update).
+# Structural facts only. Business meaning lives in the semantic maps.
+
+meta:
+  type: generated
+  migration_count: 35
+  table_count: 83
+
+schemas:
+  - analytics
+  - app
+  - audit
+  - compensation
+  - core
+  - documents
+  - expense
+  - identity
+  - integration
+  - leave_mgmt
+  - notification
+  - payroll
+  - performance
+  - recruitment
+  - workflow
+  - workforce
+
+migrations:
+  - db/migrations/0001_foundation.sql
+  - db/migrations/0002_identity_and_org.sql
+  - db/migrations/0003_core_hr.sql
+  - db/migrations/0004_workforce.sql
+  - db/migrations/0005_leave.sql
+  - db/migrations/0006_compensation_payroll.sql
+  - db/migrations/0007_workflow_documents_audit_events.sql
+  - db/migrations/0008_seed_platform_data.sql
+  - db/migrations/0009_purge_mode.sql
+  - db/migrations/0010_purge_finalized_payroll.sql
+  - db/migrations/0011_attendance_close.sql
+  - db/migrations/0013_rls_exemption_declarations.sql
+  - db/migrations/0014_notification_sending_state.sql
+  - db/migrations/0015_expense.sql
+  - db/migrations/0016_onboarding_and_auth.sql
+  - db/migrations/0017_leave_lifecycle_and_payment.sql
+  - db/migrations/0018_leave_job_null_key.sql
+  - db/migrations/0019_scheduled_jobs.sql
+  - db/migrations/0020_queue_dead_letter.sql
+  - db/migrations/0021_mfa.sql
+  - db/migrations/0022_trace_context.sql
+  - db/migrations/0023_payroll_correctness.sql
+  - db/migrations/0024_tax_year_and_run_recovery.sql
+  - db/migrations/0025_hra_exemption.sql
+  - db/migrations/0028_snapshot_hra_inputs.sql
+  - db/migrations/0029_hra_exemption_on_slip.sql
+  - db/migrations/0030_restore_slip_guard_purge_escape.sql
+  - db/migrations/0031_section_exemption_caps.sql
+  - db/migrations/0032_proof_cutoff.sql
+  - db/migrations/0033_surcharge_and_marginal_relief.sql
+  - db/migrations/0034_professional_tax_states.sql
+  - db/migrations/0035_report_runs.sql
+  - db/migrations/0036_workflow_completion.sql
+  - db/migrations/0037_notification_preferences.sql
+  - db/migrations/0038_tenant_branding.sql
+
+tables:
+  analytics.report_run:
+    file: db/migrations/0035_report_runs.sql
+    has_tenant_id: true
+    rls_enabled: true
+  audit.audit_log:
+    file: db/migrations/0007_workflow_documents_audit_events.sql
+    has_tenant_id: true
+    rls_enabled: true
+  compensation.additional_salary:
+    file: db/migrations/0006_compensation_payroll.sql
+    has_tenant_id: true
+    rls_enabled: true
+  compensation.compensation_revision:
+    file: db/migrations/0006_compensation_payroll.sql
+    has_tenant_id: true
+    rls_enabled: true
+  compensation.rent_declaration:
+    file: db/migrations/0025_hra_exemption.sql
+    has_tenant_id: true
+    rls_enabled: true
+  compensation.salary_assignment:
+    file: db/migrations/0006_compensation_payroll.sql
+    has_tenant_id: true
+    rls_enabled: true
+  compensation.salary_component:
+    file: db/migrations/0006_compensation_payroll.sql
+    has_tenant_id: true
+    rls_enabled: true
+  compensation.salary_structure:
+    file: db/migrations/0006_compensation_payroll.sql
+    has_tenant_id: true
+    rls_enabled: true
+  compensation.salary_structure_component:
+    file: db/migrations/0006_compensation_payroll.sql
+    has_tenant_id: true
+    rls_enabled: true
+  compensation.tax_declaration:
+    file: db/migrations/0006_compensation_payroll.sql
+    has_tenant_id: true
+    rls_enabled: true
+  compensation.tax_declaration_item:
+    file: db/migrations/0031_section_exemption_caps.sql
+    has_tenant_id: true
+    rls_enabled: true
+  core.bank_account:
+    file: db/migrations/0003_core_hr.sql
+    has_tenant_id: true
+    rls_enabled: true
+  core.branch:
+    file: db/migrations/0002_identity_and_org.sql
+    has_tenant_id: true
+    rls_enabled: true
+  core.company:
+    file: db/migrations/0002_identity_and_org.sql
+    has_tenant_id: true
+    rls_enabled: true
+  core.department:
+    file: db/migrations/0002_identity_and_org.sql
+    has_tenant_id: true
+    rls_enabled: true
+  core.designation:
+    file: db/migrations/0002_identity_and_org.sql
+    has_tenant_id: true
+    rls_enabled: true
+  core.emergency_contact:
+    file: db/migrations/0003_core_hr.sql
+    has_tenant_id: true
+    rls_enabled: true
+  core.employee:
+    file: db/migrations/0003_core_hr.sql
+    has_tenant_id: true
+    rls_enabled: true
+  core.employment_history:
+    file: db/migrations/0003_core_hr.sql
+    has_tenant_id: true
+    rls_enabled: true
+  core.location:
+    file: db/migrations/0002_identity_and_org.sql
+    has_tenant_id: true
+    rls_enabled: true
+  core.tax_profile:
+    file: db/migrations/0003_core_hr.sql
+    has_tenant_id: true
+    rls_enabled: true
+  documents.document:
+    file: db/migrations/0007_workflow_documents_audit_events.sql
+    has_tenant_id: true
+    rls_enabled: true
+  expense.advance_settlement:
+    file: db/migrations/0015_expense.sql
+    has_tenant_id: true
+    rls_enabled: true
+  expense.employee_advance:
+    file: db/migrations/0015_expense.sql
+    has_tenant_id: true
+    rls_enabled: true
+  expense.expense_claim:
+    file: db/migrations/0015_expense.sql
+    has_tenant_id: true
+    rls_enabled: true
+  expense.expense_line:
+    file: db/migrations/0015_expense.sql
+    has_tenant_id: true
+    rls_enabled: true
+  expense.expense_type:
+    file: db/migrations/0015_expense.sql
+    has_tenant_id: true
+    rls_enabled: true
+  identity.app_user:
+    file: db/migrations/0002_identity_and_org.sql
+    has_tenant_id: false
+    rls_enabled: false
+  identity.auth_token:
+    file: db/migrations/0016_onboarding_and_auth.sql
+    has_tenant_id: false
+    rls_enabled: false
+    rls_exempt_reason: "global user identity; a reset must work before a tenant is chosen"
+  identity.membership_role:
+    file: db/migrations/0002_identity_and_org.sql
+    has_tenant_id: true
+    rls_enabled: true
+  identity.mfa_recovery_code:
+    file: db/migrations/0021_mfa.sql
+    has_tenant_id: false
+    rls_enabled: false
+    rls_exempt_reason: "belongs to the global user record, like user_mfa"
+  identity.permission:
+    file: db/migrations/0002_identity_and_org.sql
+    has_tenant_id: false
+    rls_enabled: false
+  identity.refresh_token:
+    file: db/migrations/0002_identity_and_org.sql
+    has_tenant_id: true
+    rls_enabled: true
+  identity.role:
+    file: db/migrations/0002_identity_and_org.sql
+    has_tenant_id: true
+    rls_enabled: true
+  identity.role_permission:
+    file: db/migrations/0002_identity_and_org.sql
+    has_tenant_id: true
+    rls_enabled: true
+  identity.tenant:
+    file: db/migrations/0002_identity_and_org.sql
+    has_tenant_id: false
+    rls_enabled: true
+  identity.tenant_branding:
+    file: db/migrations/0038_tenant_branding.sql
+    has_tenant_id: true
+    rls_enabled: true
+  identity.tenant_membership:
+    file: db/migrations/0002_identity_and_org.sql
+    has_tenant_id: true
+    rls_enabled: true
+  identity.tenant_purge_log:
+    file: db/migrations/0009_purge_mode.sql
+    has_tenant_id: true
+    rls_enabled: false
+    rls_exempt_reason: "platform evidence of an erasure; must outlive the tenant it names"
+  identity.user_mfa:
+    file: db/migrations/0021_mfa.sql
+    has_tenant_id: false
+    rls_enabled: false
+    rls_exempt_reason: "global user credential; a person has one authenticator across every tenant"
+  integration.event_outbox:
+    file: db/migrations/0007_workflow_documents_audit_events.sql
+    has_tenant_id: true
+    rls_enabled: true
+  integration.local_queue_message:
+    file: db/migrations/0007_workflow_documents_audit_events.sql
+    has_tenant_id: false
+    rls_enabled: false
+    rls_exempt_reason: "transport, not business data; reachable only by the platform role"
+  integration.processed_event:
+    file: db/migrations/0007_workflow_documents_audit_events.sql
+    has_tenant_id: true
+    rls_enabled: true
+  integration.scheduled_job:
+    file: db/migrations/0019_scheduled_jobs.sql
+    has_tenant_id: true
+    rls_enabled: true
+  leave_mgmt.leave_allocation:
+    file: db/migrations/0005_leave.sql
+    has_tenant_id: true
+    rls_enabled: true
+  leave_mgmt.leave_application:
+    file: db/migrations/0005_leave.sql
+    has_tenant_id: true
+    rls_enabled: true
+  leave_mgmt.leave_encashment:
+    file: db/migrations/0005_leave.sql
+    has_tenant_id: true
+    rls_enabled: true
+  leave_mgmt.leave_ledger_entry:
+    file: db/migrations/0005_leave.sql
+    has_tenant_id: true
+    rls_enabled: true
+  leave_mgmt.leave_period_job:
+    file: db/migrations/0017_leave_lifecycle_and_payment.sql
+    has_tenant_id: true
+    rls_enabled: true
+  leave_mgmt.leave_policy:
+    file: db/migrations/0005_leave.sql
+    has_tenant_id: true
+    rls_enabled: true
+  leave_mgmt.leave_policy_assignment:
+    file: db/migrations/0005_leave.sql
+    has_tenant_id: true
+    rls_enabled: true
+  leave_mgmt.leave_policy_rule:
+    file: db/migrations/0005_leave.sql
+    has_tenant_id: true
+    rls_enabled: true
+  leave_mgmt.leave_type:
+    file: db/migrations/0005_leave.sql
+    has_tenant_id: true
+    rls_enabled: true
+  notification.notification:
+    file: db/migrations/0007_workflow_documents_audit_events.sql
+    has_tenant_id: true
+    rls_enabled: true
+  notification.notification_preference:
+    file: db/migrations/0037_notification_preferences.sql
+    has_tenant_id: true
+    rls_enabled: true
+  payroll.employee_tax_opening:
+    file: db/migrations/0023_payroll_correctness.sql
+    has_tenant_id: true
+    rls_enabled: true
+  payroll.payment_batch:
+    file: db/migrations/0017_leave_lifecycle_and_payment.sql
+    has_tenant_id: true
+    rls_enabled: true
+  payroll.payment_line:
+    file: db/migrations/0017_leave_lifecycle_and_payment.sql
+    has_tenant_id: true
+    rls_enabled: true
+  payroll.payroll_employee:
+    file: db/migrations/0006_compensation_payroll.sql
+    has_tenant_id: true
+    rls_enabled: true
+  payroll.payroll_input_snapshot:
+    file: db/migrations/0006_compensation_payroll.sql
+    has_tenant_id: true
+    rls_enabled: true
+  payroll.payroll_period:
+    file: db/migrations/0006_compensation_payroll.sql
+    has_tenant_id: true
+    rls_enabled: true
+  payroll.payroll_run:
+    file: db/migrations/0006_compensation_payroll.sql
+    has_tenant_id: true
+    rls_enabled: true
+  payroll.salary_slip:
+    file: db/migrations/0006_compensation_payroll.sql
+    has_tenant_id: true
+    rls_enabled: true
+  payroll.salary_slip_component:
+    file: db/migrations/0006_compensation_payroll.sql
+    has_tenant_id: true
+    rls_enabled: true
+  payroll.statutory_rule:
+    file: db/migrations/0006_compensation_payroll.sql
+    has_tenant_id: true
+    rls_enabled: true
+  payroll.tax_exemption_rule:
+    file: db/migrations/0031_section_exemption_caps.sql
+    has_tenant_id: true
+    rls_enabled: true
+  payroll.tax_year:
+    file: db/migrations/0024_tax_year_and_run_recovery.sql
+    has_tenant_id: true
+    rls_enabled: true
+  payroll.tenant_payroll_policy:
+    file: db/migrations/0024_tax_year_and_run_recovery.sql
+    has_tenant_id: true
+    rls_enabled: true
+  recruitment.onboarding_plan:
+    file: db/migrations/0016_onboarding_and_auth.sql
+    has_tenant_id: true
+    rls_enabled: true
+  recruitment.onboarding_task:
+    file: db/migrations/0016_onboarding_and_auth.sql
+    has_tenant_id: true
+    rls_enabled: true
+  recruitment.onboarding_template:
+    file: db/migrations/0016_onboarding_and_auth.sql
+    has_tenant_id: true
+    rls_enabled: true
+  recruitment.onboarding_template_task:
+    file: db/migrations/0016_onboarding_and_auth.sql
+    has_tenant_id: true
+    rls_enabled: true
+  workflow.approval_task:
+    file: db/migrations/0007_workflow_documents_audit_events.sql
+    has_tenant_id: true
+    rls_enabled: true
+  workflow.workflow_definition:
+    file: db/migrations/0007_workflow_documents_audit_events.sql
+    has_tenant_id: true
+    rls_enabled: true
+  workflow.workflow_delegation:
+    file: db/migrations/0036_workflow_completion.sql
+    has_tenant_id: true
+    rls_enabled: true
+  workflow.workflow_instance:
+    file: db/migrations/0007_workflow_documents_audit_events.sql
+    has_tenant_id: true
+    rls_enabled: true
+  workforce.attendance:
+    file: db/migrations/0004_workforce.sql
+    has_tenant_id: true
+    rls_enabled: true
+  workforce.attendance_correction:
+    file: db/migrations/0004_workforce.sql
+    has_tenant_id: true
+    rls_enabled: true
+  workforce.employee_checkin:
+    file: db/migrations/0004_workforce.sql
+    has_tenant_id: true
+    rls_enabled: true
+  workforce.holiday:
+    file: db/migrations/0004_workforce.sql
+    has_tenant_id: true
+    rls_enabled: true
+  workforce.holiday_list:
+    file: db/migrations/0004_workforce.sql
+    has_tenant_id: true
+    rls_enabled: true
+  workforce.shift_assignment:
+    file: db/migrations/0004_workforce.sql
+    has_tenant_id: true
+    rls_enabled: true
+  workforce.shift_type:
+    file: db/migrations/0004_workforce.sql
+    has_tenant_id: true
+    rls_enabled: true

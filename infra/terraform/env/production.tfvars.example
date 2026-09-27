@@ -1,0 +1,30 @@
+# Copy to production.tfvars and fill in. The real file is gitignored: it names account
+# resources, and an ACM ARN plus a domain is a useful map for someone who should not have one.
+
+environment = "production"
+aws_region  = "ap-south-1"
+
+availability_zones = ["ap-south-1a", "ap-south-1b"]
+
+# Images are built by CI and pushed by the deploy pipeline. Pin a digest, not a tag: a tag
+# can be moved, and "which build is in production" should have one answer.
+api_image    = "<account>.dkr.ecr.ap-south-1.amazonaws.com/hrms-api@sha256:..."
+worker_image = "<account>.dkr.ecr.ap-south-1.amazonaws.com/hrms-worker@sha256:..."
+
+certificate_arn = "arn:aws:acm:ap-south-1:<account>:certificate/..."
+cors_origins    = "https://app.example.com"
+ses_domain      = "example.com"
+
+db_instance_class        = "db.r7g.large"
+db_allocated_storage_gb  = 200
+db_backup_retention_days = 35
+
+redis_node_type = "cache.t4g.small"
+
+api_desired_count = 3
+worker_desired_count = 3
+# Two, not one. Claims use FOR UPDATE SKIP LOCKED, so a second replica is redundancy rather
+# than a race — and a scheduler that is down means attendance silently stops closing.
+scheduler_desired_count = 2
+
+log_retention_days = 365

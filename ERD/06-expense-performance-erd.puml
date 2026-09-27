@@ -1,0 +1,113 @@
+@startuml HRMS_Expense_Performance_ERD
+hide circle
+skinparam linetype ortho
+title HRMS PostgreSQL - Expense & Performance ERD
+
+entity employee {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  employee_code : varchar
+}
+
+entity expense_type {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  name : varchar
+  receipt_required : boolean
+  limit_amount : numeric?
+}
+
+entity expense_claim {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  employee_id : uuid <<FK>>
+  claim_number : varchar
+  claim_date : date
+  status : varchar
+  total_amount : numeric
+}
+
+entity expense_line {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  expense_claim_id : uuid <<FK>>
+  expense_type_id : uuid <<FK>>
+  expense_date : date
+  amount : numeric
+  tax_amount : numeric?
+  receipt_document_id : uuid?
+}
+
+entity employee_advance {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  employee_id : uuid <<FK>>
+  amount : numeric
+  outstanding_amount : numeric
+  status : varchar
+}
+
+entity performance_cycle {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  name : varchar
+  start_date : date
+  end_date : date
+  status : varchar
+}
+
+entity goal {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  employee_id : uuid <<FK>>
+  cycle_id : uuid <<FK>>
+  title : varchar
+  target : text
+  weight : numeric
+  status : varchar
+}
+
+entity performance_review {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  cycle_id : uuid <<FK>>
+  employee_id : uuid <<FK>>
+  reviewer_employee_id : uuid <<FK>>
+  review_type : varchar
+  rating : numeric?
+  comments : text
+  status : varchar
+}
+
+entity feedback {
+  *id : uuid <<PK>>
+  --
+  tenant_id : uuid
+  performance_review_id : uuid <<FK>>
+  reviewer_employee_id : uuid <<FK>>
+  comments : text
+  rating : numeric?
+}
+
+employee ||--o{ expense_claim
+expense_claim ||--o{ expense_line
+expense_type ||--o{ expense_line
+employee ||--o{ employee_advance
+
+performance_cycle ||--o{ goal
+employee ||--o{ goal
+performance_cycle ||--o{ performance_review
+employee ||--o{ performance_review
+employee ||--o{ performance_review : reviews
+performance_review ||--o{ feedback
+employee ||--o{ feedback
+
+@enduml

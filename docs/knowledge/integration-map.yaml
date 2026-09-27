@@ -1,0 +1,117 @@
+# SEMANTIC - external systems, infrastructure roles and the node/python boundary.
+# Source: ArchitectureDiagram/01, 02, 06 and PRD s.24.
+
+meta:
+  type: semantic
+  schema_version: 1
+  status: planned (no infrastructure provisioned)
+
+infrastructure:
+
+  postgresql:
+    purpose: [transactional_source_of_truth, tenant_isolation_rls]
+    deployment: rds / aurora postgresql
+    rule: never make redis, sqs or s3 the source of truth for HR transactions
+    used_by: [node-api, api-worker, workforce-engine, payroll-engine]
+
+  aws_sqs:
+    purpose: [asynchronous_processing, domain_events]
+    delivery: at-least-once, duplicates possible
+    requires: [dlq_per_queue, idempotent_consumers, tenant_id_in_envelope]
+    used_by: [node-api, api-worker, workforce-engine, payroll-engine]
+
+  aws_s3:
+    purpose: [document_storage, payslip_pdf, generated_reports]
+    access: private bucket, presigned urls only, KMS encrypted
+    metadata_in: documents.document
+    used_by: [node-api, api-worker]
+
+  aws_ses:
+    purpose: [email_notifications]
+    used_by: [api-worker, notification]
+
+  redis:
+    purpose: [distributed_rate_limiting]
+    deployment: elasticache
+    status: implemented
+    rule: cache only; never authoritative, never a tenant-context store
+    used_by: [node-api]
+    required_in_production: true
+    failure_behaviour: >-
+      Fails open. A Redis outage degrades rate limiting to per-process rather than refusing
+      traffic - it is an abuse control, not a correctness control, and isolation and
+      authorization are enforced elsewhere. The API still refuses to *start* in production
+      without REDIS_URL, because a silently per-process limit is a misconfiguration.
+    not_yet_used_for: [response caching, distributed locks]
+
+  cloudwatch:
+    purpose: [logs, metrics, alarms]
+
+  opentelemetry:
+    purpose: [distributed_tracing, correlation_id propagation]
+
+  secrets_manager:
+    purpose: [application_secrets]
+
+  kms:
+    purpose: [encryption_keys for rds, s3 and sensitive columns]
+
+processing_boundary:
+  rule: node owns transactions, state transitions and authorization; python owns calculation
+  workforce_processing:
+    producer: node
+    consumer: fastapi
+    broker: sqs
+    trigger_event: CheckinRecorded
+    result_event: AttendanceCalculated
+    writes: [workforce.attendance]
+  payroll_processing:
+    producer: node
+    consumer: fastapi
+    broker: sqs
+    trigger_event: PayrollRunCreated
+    result_event: [PayrollCalculated, SalarySlipGenerated]
+    reads: [payroll.payroll_input_snapshot]
+    writes: [payroll.payroll_employee, payroll.salary_slip, payroll.salary_slip_component]
+  platform_jobs:
+    producer: node
+    consumer: node
+    broker: sqs
+    handles: [notifications, payslip pdf generation, document jobs, orchestration]
+
+external_systems:
+
+  identity_provider:
+    direction: outbound
+    purpose: [optional enterprise sso - oauth / saml]
+    status: planned
+    priority: p2
+
+  biometric_devices:
+    direction: inbound
+    purpose: [attendance check-in events]
+    status: planned
+    notes: clock drift, offline batches and duplicate pushes are expected; intake must dedupe on external_event_id
+
+  bank_payment_system:
+    direction: outbound
+    purpose: [salary payment instructions and exports]
+    status: planned
+    notes: triggered only after payroll FINALIZED
+
+  accounting_erp:
+    direction: outbound
+    purpose: [payroll and expense journal export]
+    status: planned
+    priority: p2
+
+  calendar_system:
+    direction: outbound
+    purpose: [interview and hr event sync]
+    status: planned
+    priority: p2
+
+principles:
+  - integrations happen through APIs and events, never direct database access
+  - every outbound integration is retryable and produces an auditable record
+  - an external system is never inside a business transaction
